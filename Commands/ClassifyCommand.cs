@@ -1,4 +1,4 @@
-using System;
+Ôªøusing System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.Attributes;
@@ -22,7 +22,7 @@ namespace CoordinatorPro.Commands
         {
      try
      {
-             // 1. PREPARA«√O
+             // 1. PREPARA√á√ÉO
      UIDocument uidoc = commandData.Application.ActiveUIDocument;
     if (uidoc == null)
     {
@@ -32,36 +32,36 @@ namespace CoordinatorPro.Commands
        
                 Document doc = uidoc.Document;
                 
-   // Inicializar serviÁo de classificaÁ„o
+   // Inicializar servi√ßo de classifica√ß√£o
           if (!ClassificationService.Initialize())
         {
-     TaskDialog.Show("Erro", "Falha ao inicializar base de dados UniClass.\nVerifique se o arquivo uniclass2015.json est· presente.");
+     TaskDialog.Show("Erro", "Falha ao inicializar base de dados UniClass.\nVerifique se o arquivo uniclass2015.json est√° presente.");
       return Result.Failed;
     }
       
-       // DEBUG: Executar teste de classificaÁ„o
+       // DEBUG: Executar teste de classifica√ß√£o
        ClassificationService.TestClassification();
        
-  // 2. SELE«√O DE ELEMENTOS
+  // 2. SELE√á√ÉO DE ELEMENTOS
           IList<Element> elementsToClassify = GetElementsToClassify(uidoc);
 if (elementsToClassify == null || !elementsToClassify.Any())
         {
-       TaskDialog.Show("UniClass 2015", "Nenhum elemento selecionado ou v·lido.");
+       TaskDialog.Show("UniClass 2015", "Nenhum elemento selecionado ou v√°lido.");
  return Result.Cancelled;
            }
                 
-  // 3. COLETAR PAR¬METROS DISPONÕVEIS
+  // 3. COLETAR PAR√ÇMETROS DISPON√çVEIS
           List<string> availableParams = ParameterService.GetEditableParameters(doc, elementsToClassify.First());
  
          if (!availableParams.Any())
        {
              TaskDialog.Show("UniClass 2015", 
-      "Nenhum par‚metro edit·vel de texto disponÌvel nos elementos selecionados.\n\n" +
-                 "Dica: Adicione par‚metros compartilhados ou use par‚metros padr„o como Comments, Description, etc.");
+      "Nenhum par√¢metro edit√°vel de texto dispon√≠vel nos elementos selecionados.\n\n" +
+                 "Dica: Adicione par√¢metros compartilhados ou use par√¢metros padr√£o como Comments, Description, etc.");
            return Result.Cancelled;
      }
       
-     // 4. MOSTRAR FORM DE SELE«√O
+     // 4. MOSTRAR FORM DE SELE√á√ÉO
           string targetParameter;
        bool showProgress;
   
@@ -95,13 +95,13 @@ if (elementsToClassify == null || !elementsToClassify.Any())
          message = ex.Message;
           TaskDialog.Show("Erro Inesperado", 
   $"Erro ao classificar elementos:\n\n{ex.Message}\n\n" +
-   $"Detalhes tÈcnicos:\n{ex.GetType().Name}");
+   $"Detalhes t√©cnicos:\n{ex.GetType().Name}");
            return Result.Failed;
         }
         }
         
         /// <summary>
-     /// ObtÈm elementos para classificar (da seleÁ„o atual ou nova seleÁ„o)
+     /// Obt√©m elementos para classificar (da sele√ß√£o atual ou nova sele√ß√£o)
         /// </summary>
      private IList<Element> GetElementsToClassify(UIDocument uidoc)
       {
@@ -109,7 +109,7 @@ if (elementsToClassify == null || !elementsToClassify.Any())
             {
          var selectedIds = uidoc.Selection.GetElementIds();
        
-      // Tentar usar seleÁ„o atual
+      // Tentar usar sele√ß√£o atual
            if (selectedIds.Any())
           {
              var selectedElements = selectedIds
@@ -121,11 +121,11 @@ if (elementsToClassify == null || !elementsToClassify.Any())
   return selectedElements;
  }
        
-             // Pedir nova seleÁ„o
-     TaskDialog td = new TaskDialog("SeleÁ„o de Elementos")
+             // Pedir nova sele√ß√£o
+     TaskDialog td = new TaskDialog("Sele√ß√£o de Elementos")
               {
-         MainContent = "Nenhum elemento v·lido selecionado.\n\nDeseja selecionar elementos agora?",
-    MainInstruction = "SeleÁ„o de Elementos",
+         MainContent = "Nenhum elemento v√°lido selecionado.\n\nDeseja selecionar elementos agora?",
+    MainInstruction = "Sele√ß√£o de Elementos",
  CommonButtons = TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No,
         DefaultButton = TaskDialogResult.Yes
       };
@@ -157,7 +157,7 @@ if (elementsToClassify == null || !elementsToClassify.Any())
 }
         
         /// <summary>
-        /// Verifica se elemento È v·lido para classificaÁ„o
+        /// Verifica se elemento √© v√°lido para classifica√ß√£o
      /// </summary>
         private bool IsValidElement(Element element)
       {
@@ -168,7 +168,7 @@ if (elementsToClassify == null || !elementsToClassify.Any())
         }
         
         /// <summary>
-  /// Classifica lista de elementos com transaÁ„o e progresso
+  /// Classifica lista de elementos com transa√ß√£o e progresso
         /// </summary>
       private Dictionary<Element, ClassificationResult> ClassifyElements(
      Document doc,
@@ -215,7 +215,7 @@ if (elementsToClassify == null || !elementsToClassify.Any())
       var result = ClassificationService.Classify(elementData);
         results[element] = result;
        
-           // DEBUG: Se n„o classificou, mostrar informaÁıes de debug
+           // DEBUG: Se n√£o classificou, mostrar informa√ß√µes de debug
            if (result.Confidence == 0 && result.Source != "Error")
            {
                string debugInfo = $"=== DEBUG ELEMENTO {current}/{total} ===\n" +
@@ -228,7 +228,7 @@ if (elementsToClassify == null || !elementsToClassify.Any())
                // TaskDialog.Show("Debug Info", debugInfo);
            }
        
-           // Atualizar par‚metro se confianÁa suficiente
+           // Atualizar par√¢metro se confian√ßa suficiente
          if (result.Confidence > 0)
               {
          bool updated = ParameterService.SetParameterValue(doc, element, targetParameter, result.Code);
@@ -252,7 +252,7 @@ if (elementsToClassify == null || !elementsToClassify.Any())
            catch (Exception ex)
          {
          trans.RollBack();
-      throw new Exception($"Erro durante classificaÁ„o: {ex.Message}", ex);
+      throw new Exception($"Erro durante classifica√ß√£o: {ex.Message}", ex);
        }
    }
     
@@ -261,7 +261,7 @@ if (elementsToClassify == null || !elementsToClassify.Any())
              {
       progressForm.ShowSummary();
         
-       // Aguardar usu·rio fechar ou auto-close
+       // Aguardar usu√°rio fechar ou auto-close
            while (progressForm.Visible)
       {
      WinForms.Application.DoEvents();
@@ -299,30 +299,30 @@ if (progressForm.Visible)
             
             double avgConfidence = results.Average(r => r.Value.Confidence);
      
-            string summary = $"ClassificaÁ„o concluÌda!\n\n" +
+            string summary = $"Classifica√ß√£o conclu√≠da!\n\n" +
     $"Total de elementos: {total}\n" +
-     $"? Classificados com sucesso (>{MIN_CONFIDENCE_THRESHOLD}%): {success}\n" +
-    $"? Classificados parcialmente (?{MIN_CONFIDENCE_THRESHOLD}%): {partial}\n" +
-          $"? N„o classificados: {failed}\n";
+     $"‚úì Classificados com sucesso (>{MIN_CONFIDENCE_THRESHOLD}%): {success}\n" +
+    $"‚ö† Classificados parcialmente (‚â§{MIN_CONFIDENCE_THRESHOLD}%): {partial}\n" +
+          $"‚úó N√£o classificados: {failed}\n";
             
          if (paramErrors > 0)
             {
-       summary += $"? Erros ao atualizar par‚metro: {paramErrors}\n";
+       summary += $"‚ö† Erros ao atualizar par√¢metro: {paramErrors}\n";
    }
   
-       summary += $"\nConfianÁa mÈdia: {avgConfidence:F1}%";
+       summary += $"\nConfian√ßa m√©dia: {avgConfidence:F1}%";
 
-            // Adicionar dicas se houver muitos n„o classificados
+            // Adicionar dicas se houver muitos n√£o classificados
             if (failed > total * 0.3)
  {
-             summary += "\n\n?? Dica: Muitos elementos n„o foram classificados.\n" +
-      "Verifique se a base UniClass est· completa e se os\n" +
-    "elementos possuem informaÁıes de Family/Type.";
+             summary += "\n\nüí° Dica: Muitos elementos n√£o foram classificados.\n" +
+      "Verifique se a base UniClass est√° completa e se os\n" +
+    "elementos possuem informa√ß√µes de Family/Type.";
             }
    
-     TaskDialog td = new TaskDialog("Resultado da ClassificaÁ„o")
+     TaskDialog td = new TaskDialog("Resultado da Classifica√ß√£o")
      {
-     MainInstruction = "ClassificaÁ„o UniClass 2015",
+     MainInstruction = "Classifica√ß√£o UniClass 2015",
          MainContent = summary,
  MainIcon = success > partial + failed ? 
           TaskDialogIcon.TaskDialogIconInformation : 
@@ -334,7 +334,7 @@ if (progressForm.Visible)
     }
     
   /// <summary>
-    /// Filtro para seleÁ„o de elementos v·lidos
+    /// Filtro para sele√ß√£o de elementos v√°lidos
     /// </summary>
     public class ElementSelectionFilter : ISelectionFilter
     {
@@ -350,4 +350,5 @@ if (progressForm.Visible)
             return false;
    }
     }
+
 }

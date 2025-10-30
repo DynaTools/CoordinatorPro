@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace CoordinatorPro.Models
 {
@@ -7,9 +7,13 @@ namespace CoordinatorPro.Models
         public string Code { get; set; }
         public string Title { get; set; }
         public string Parent { get; set; }
-     public string Description { get; set; }
+        public string Description { get; set; }
+        public List<string> Keywords { get; set; } = new List<string>(); // ✅ ADICIONADO
+        public string Category { get; set; } // ✅ ADICIONADO (estava no JSON)
+        public int Level { get; set; } // ✅ ADICIONADO (estava no JSON)
+        public List<string> Children { get; set; } = new List<string>(); // ✅ ADICIONADO
     }
-    
+
     public class ClassificationResult
     {
         public string Code { get; set; }

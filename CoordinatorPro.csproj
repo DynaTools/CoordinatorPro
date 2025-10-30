@@ -107,6 +107,8 @@
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
     <None Include="FLUXOGRAMA.md" />
+    <None Include="Install.bat" />
+    <None Include="INSTALL_FUZZYSHARP.md" />
     <None Include="packages.config" />
     <None Include="Prompt.md" />
     <None Include="Properties\Settings.settings">
@@ -119,7 +121,7 @@
       <DesignTimeSharedInput>True</DesignTimeSharedInput>
     </Compile>
     <None Include="README.md" />
-    <Content Include="uniclass2015.json">
+    <Content Include="Uniclass2015_Pr_v1_39.xlsx">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <None Include="UniClassClassifier.addin" />

@@ -1,9 +1,11 @@
-using System;
+Ôªøusing System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Threading.Tasks;
+using System.Collections.Concurrent;
 using CoordinatorPro.Models;
 using Newtonsoft.Json;
 
@@ -11,464 +13,377 @@ namespace CoordinatorPro.Services
 {
     public static class ClassificationService
     {
-   private static List<UniClassItem> _database;
-     private static Dictionary<string, string> _cache = new Dictionary<string, string>();
- private const int MAX_CACHE_SIZE = 1000;
-     private const int DEFAULT_CUTOFF = 60;
-  private const int HIGH_CONFIDENCE_THRESHOLD = 80;
-        
-  // Pesos para construÁ„o da string de busca
-        private const int CATEGORY_WEIGHT = 3;
- private const int FAMILY_WEIGHT = 2;
-      private const int TYPE_WEIGHT = 2;
-        
-  /// <summary>
-     /// Inicializa o serviÁo carregando a base de dados UniClass
-        /// </summary>
- /// <returns>True se inicializado com sucesso</returns>
+        private static List<UniClassItem> _database;
+        private static ConcurrentDictionary<string, string> _cache = new ConcurrentDictionary<string, string>();
+
+        // ‚úÖ √çNDICES PR√â-CALCULADOS
+        private static Dictionary<string, List<int>> _categoryIndex;
+        private static Dictionary<string, List<int>> _keywordIndex;
+        private static List<string> _uniclassStrings;
+
+        private const int DEFAULT_CUTOFF = 40;
+        private const int HIGH_CONFIDENCE_THRESHOLD = 80;
+
+        // ‚úÖ MAPEAMENTO SIMPLIFICADO (1 palavra-chave por categoria)
+        private static readonly Dictionary<string, string> CategoryMapping = new Dictionary<string, string>
+        {
+            {"Walls", "wall"},
+            {"Doors", "door"},
+            {"Windows", "window"},
+            {"Floors", "floor"},
+            {"Roofs", "roof"},
+            {"Stairs", "stair"},
+            {"Railings", "railing"},
+            {"Columns", "column"},
+            {"Structural Framing", "beam"},
+            {"Structural Foundations", "foundation"},
+            {"Mechanical Equipment", "mechanical"},
+            {"Plumbing Fixtures", "sanitary"},
+            {"Lighting Fixtures", "lighting"},
+            {"Furniture", "furniture"},
+            {"Casework", "casework"},
+            {"Ceilings", "ceiling"},
+            {"Curtain Panels", "panel"},
+            {"Pipes", "pipe"},
+            {"Ducts", "duct"},
+            {"Cable Trays", "cable"}
+        };
+
         public static bool Initialize()
-{
-if (_database != null)
-     return true; // J· inicializado
-       
-   try
-   {
-    string json = LoadDatabaseJson();
-       
-      if (string.IsNullOrEmpty(json))
-        return false;
-       
-    _database = JsonConvert.DeserializeObject<List<UniClassItem>>(json);
-         
-    if (_database == null || !_database.Any())
-  {
-    _database = new List<UniClassItem>();
-        return false;
-       }
-  
-     return true;
-         }
-            catch (JsonException jsonEx)
-   {
-    System.Diagnostics.Debug.WriteLine($"Erro ao deserializar JSON: {jsonEx.Message}");
-_database = new List<UniClassItem>();
- return false;
-     }
-  catch (Exception ex)
- {
-  System.Diagnostics.Debug.WriteLine($"Erro ao inicializar ClassificationService: {ex.Message}");
-   _database = new List<UniClassItem>();
-      return false;
-}
-        }
-        
-        /// <summary>
-        /// Carrega JSON da base de dados (recurso embarcado ou arquivo externo)
-   /// </summary>
-     private static string LoadDatabaseJson()
-{
-// Tentar carregar como recurso embarcado primeiro
-  try
         {
-    var assembly = Assembly.GetExecutingAssembly();
-    var resourceName = "CoordinatorPro.uniclass2015.json";
-     
-    using (Stream stream = assembly.GetManifestResourceStream(resourceName))
-       {
-       if (stream != null)
-   {
-        using (StreamReader reader = new StreamReader(stream))
-    {
-     return reader.ReadToEnd();
-           }
-         }
-    }
-     }
-   catch (Exception ex)
- {
-      System.Diagnostics.Debug.WriteLine($"Recurso embarcado n„o encontrado: {ex.Message}");
-            }
-   
-       // Tentar carregar de arquivo externo
-  try
-     {
-          string assemblyPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
- string jsonPath = Path.Combine(assemblyPath, "uniclass2015.json");
-   
-    if (File.Exists(jsonPath))
-      {
-      return File.ReadAllText(jsonPath);
-}
-     }
-     catch (Exception ex)
-    {
-   System.Diagnostics.Debug.WriteLine($"Arquivo externo n„o encontrado: {ex.Message}");
-        }
-    
- return null;
-        }
-        
-     /// <summary>
-     /// Classifica elemento baseado em seus dados
-  /// </summary>
-        public static ClassificationResult Classify(Dictionary<string, string> elementData)
-{
-    if (elementData == null || !elementData.Any())
-{
-       return CreateErrorResult("Dados do elemento vazios");
- }
-     
-            if (_database == null || !_database.Any())
-            {
- return CreateErrorResult("Base de dados n„o carregada");
-}
-      
-     // Criar chave de cache
-        string cacheKey = BuildCacheKey(elementData);
-  
-       // Verificar cache
- if (!string.IsNullOrEmpty(cacheKey) && _cache.ContainsKey(cacheKey))
-      {
-     return new ClassificationResult
-         {
- Code = _cache[cacheKey],
-    Confidence = 100,
-     Source = "Cache"
-     };
-       }
- 
-     // Construir string de busca com pesos
-         string searchString = BuildWeightedSearchString(elementData);
- 
-    if (string.IsNullOrEmpty(searchString))
-      {
-        return CreateErrorResult("Sem dados para classificaÁ„o");
-            }
-       
-  // Preparar strings do UniClass para busca
- var uniclassStrings = _database
-.Select(item => $"{item.Code} {item.Title} {item.Parent}")
-    .ToList();
-            
-     // Buscar com FuzzySharp
-            var results = FuzzySharp.Process.ExtractTop(
-   searchString,
-  uniclassStrings,
-          limit: 5,
-     cutoff: DEFAULT_CUTOFF
- );
- 
-        if (results != null && results.Any())
-       {
-    var best = results.First();
-     int index = uniclassStrings.IndexOf(best.Value);
-       
-    if (index >= 0 && index < _database.Count)
-     {
-   var item = _database[index];
-   string classification = $"{item.Code} - {item.Title}";
-   
-        // Adicionar ao cache se confianÁa alta
-   if (best.Score > HIGH_CONFIDENCE_THRESHOLD && !string.IsNullOrEmpty(cacheKey))
-   {
-      AddToCache(cacheKey, classification);
-   }
-          
-  return new ClassificationResult
-      {
-    Code = classification,
-     Confidence = best.Score,
-       Source = "FuzzyMatch",
-           Alternatives = BuildAlternatives(results, uniclassStrings)
-      };
-          }
-     }
-  
-  return new ClassificationResult
-     {
-    Code = "NC - N„o Classificado",
- Confidence = 0,
-     Source = "NoMatch"
-     };
-   }
-        
- /// <summary>
-        /// ConstrÛi chave de cache a partir dos dados do elemento
-   /// </summary>
-     private static string BuildCacheKey(Dictionary<string, string> elementData)
-    {
- var keyParts = new List<string>();
-      
-   if (elementData.ContainsKey("Category"))
-    keyParts.Add(elementData["Category"]);
- if (elementData.ContainsKey("Family"))
-       keyParts.Add(elementData["Family"]);
-   if (elementData.ContainsKey("Type"))
-        keyParts.Add(elementData["Type"]);
-       
-    return keyParts.Any() ? string.Join("|", keyParts) : null;
- }
- 
-        /// <summary>
-   /// ConstrÛi string de busca com pesos diferenciados
-  /// </summary>
-  private static string BuildWeightedSearchString(Dictionary<string, string> elementData)
-   {
-  var searchBuilder = new StringBuilder();
- 
-       // Categoria com maior peso
-   if (elementData.ContainsKey("Category") && !string.IsNullOrEmpty(elementData["Category"]))
-  {
-    for (int i = 0; i < CATEGORY_WEIGHT; i++)
-           searchBuilder.Append(elementData["Category"] + " ");
-   }
-   
-            // Family com peso mÈdio
-      if (elementData.ContainsKey("Family") && !string.IsNullOrEmpty(elementData["Family"]))
-    {
-         for (int i = 0; i < FAMILY_WEIGHT; i++)
-searchBuilder.Append(elementData["Family"] + " ");
-  }
-      
- // Type com peso mÈdio
-         if (elementData.ContainsKey("Type") && !string.IsNullOrEmpty(elementData["Type"]))
-            {
-         for (int i = 0; i < TYPE_WEIGHT; i++)
-    searchBuilder.Append(elementData["Type"] + " ");
-   }
-       
-     // Adicionar outros dados uma vez
-  foreach (var kvp in elementData
-    .Where(x => x.Key != "Category" && x.Key != "Family" && x.Key != "Type")
-      .Where(x => !string.IsNullOrEmpty(x.Value)))
-     {
-       searchBuilder.Append(kvp.Value + " ");
-     }
-    
-  return searchBuilder.ToString().Trim();
-        }
-  
-        /// <summary>
-   /// ConstrÛi lista de alternativas a partir dos resultados fuzzy
- /// </summary>
-   private static List<string> BuildAlternatives(
-   System.Collections.IEnumerable results,
-  List<string> uniclassStrings)
-   {
-  var list = new List<string>();
- if (results == null) return list;
- foreach (var r in results)
- {
- try
- {
- dynamic dr = r;
- string val = dr.Value as string;
- int score = (int)dr.Score;
- int idx = uniclassStrings.IndexOf(val);
- if (idx >=0 && idx < _database.Count)
- list.Add($"{_database[idx].Code} ({score}%)");
- }
- catch
- {
- // ignorar problemas de reflex„o/dynamic
- }
- }
- return list;
-        }
-        
-        /// <summary>
-  /// Adiciona item ao cache com controle de tamanho
-     /// </summary>
-private static void AddToCache(string key, string value)
- {
-   if (_cache.Count >= MAX_CACHE_SIZE)
-{
-      // Limpar metade do cache (FIFO simples)
- var keysToRemove = _cache.Keys.Take(MAX_CACHE_SIZE / 2).ToList();
-    foreach (var k in keysToRemove)
-   _cache.Remove(k);
-      }
-     
-      _cache[key] = value;
- }
-        
-        /// <summary>
-/// Cria resultado de erro padronizado
-/// </summary>
-   private static ClassificationResult CreateErrorResult(string errorMessage)
-  {
-  return new ClassificationResult
-     {
-        Code = $"NC - {errorMessage}",
-      Confidence = 0,
-    Source = "Error"
-     };
-  }
-        
-     /// <summary>
-        /// Limpa o cache de classificaÁıes
-  /// </summary>
-   public static void ClearCache()
-        {
-    _cache.Clear();
-      }
-        
-        /// <summary>
-   /// ObtÈm estatÌsticas do serviÁo
-        /// </summary>
-        public static string GetStatistics()
-     {
-      return $"Base de dados: {(_database?.Count ?? 0)} itens | Cache: {_cache.Count} entradas";
-}
- /// <summary>
-        /// ObtÈm informaÁıes de debug sobre o processo de classificaÁ„o
-        /// </summary>
-        public static string GetClassificationDebugInfo(Dictionary<string, string> elementData)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("=== DEBUG CLASSIFICA«√O ===");
-            sb.AppendLine($"Base de dados carregada: {_database?.Count ?? 0} itens");
-            sb.AppendLine($"Cache: {_cache.Count} entradas");
-            sb.AppendLine();
+            if (_database != null)
+                return true;
 
-            sb.AppendLine("Dados de entrada:");
-            foreach (var kvp in elementData)
-            {
-                sb.AppendLine($"  {kvp.Key}: '{kvp.Value}'");
-            }
-            sb.AppendLine();
-
-            // Construir string de busca
-            string searchString = BuildWeightedSearchString(elementData);
-            sb.AppendLine($"String de busca construÌda: '{searchString}'");
-            sb.AppendLine();
-
-            if (_database == null || !_database.Any())
-            {
-                sb.AppendLine("ERRO: Base de dados n„o carregada!");
-                return sb.ToString();
-            }
-
-            // Preparar strings do UniClass
-            var uniclassStrings = _database
-                .Select(item => $"{item.Code} {item.Title} {item.Parent}")
-                .ToList();
-
-            sb.AppendLine($"Buscando em {_database.Count} itens UniClass...");
-            sb.AppendLine("Itens UniClass disponÌveis:");
-            for (int i = 0; i < Math.Min(5, _database.Count); i++)
-            {
-                sb.AppendLine($"  {_database[i].Code} - {_database[i].Title}");
-            }
-            if (_database.Count > 5)
-                sb.AppendLine($"  ... e mais {_database.Count - 5} itens");
-            sb.AppendLine();
-
-            // Executar busca fuzzy
             try
             {
-                var results = FuzzySharp.Process.ExtractTop(
-                    searchString,
-                    uniclassStrings,
-                    limit: 5,
-                    cutoff: DEFAULT_CUTOFF
-                );
+                string json = LoadDatabaseJson();
 
-                sb.AppendLine($"Resultados da busca fuzzy (cutoff: {DEFAULT_CUTOFF}):");
-                if (results != null && results.Any())
+                if (string.IsNullOrEmpty(json))
+                    return false;
+
+                _database = JsonConvert.DeserializeObject<List<UniClassItem>>(json);
+
+                if (_database == null || !_database.Any())
                 {
-                    foreach (var result in results)
-                    {
-                        sb.AppendLine($"  Score: {result.Score} - '{result.Value}'");
-                    }
+                    _database = new List<UniClassItem>();
+                    return false;
                 }
-                else
-                {
-                    sb.AppendLine("  NENHUM RESULTADO ENCONTRADO!");
-                    sb.AppendLine("  PossÌveis causas:");
-                    sb.AppendLine("  - String de busca muito curta ou vazia");
-                    sb.AppendLine("  - Cutoff muito alto (atual: 60)");
-                    sb.AppendLine("  - Dados do elemento insuficientes");
-                }
+
+                // ‚úÖ CONSTRUIR √çNDICES EM PARALELO
+                BuildOptimizedIndex();
+
+                System.Diagnostics.Debug.WriteLine($"‚úì Base: {_database.Count} itens");
+                System.Diagnostics.Debug.WriteLine($"‚úì Cache pronto para {_cache.Count} entradas");
+
+                return true;
             }
             catch (Exception ex)
             {
-                sb.AppendLine($"ERRO na busca fuzzy: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Erro: {ex.Message}");
+                _database = new List<UniClassItem>();
+                return false;
             }
-
-            return sb.ToString();
         }
 
-        /// <summary>
-        /// Testa a classificaÁ„o com dados de exemplo
-        /// </summary>
+        // ‚úÖ √çNDICE OTIMIZADO COM HASH
+        private static void BuildOptimizedIndex()
+        {
+            _uniclassStrings = new List<string>(_database.Count);
+            _categoryIndex = new Dictionary<string, List<int>>();
+            _keywordIndex = new Dictionary<string, List<int>>();
+
+            // Processar em paralelo
+            var tempStrings = new string[_database.Count];
+
+            Parallel.For(0, _database.Count, i =>
+            {
+                var item = _database[i];
+
+                // String de busca pr√©-processada
+                string keywords = item.Keywords != null && item.Keywords.Any()
+                    ? string.Join(" ", item.Keywords)
+                    : "";
+
+                tempStrings[i] = $"{item.Title} {keywords}".Trim().ToLowerInvariant();
+            });
+
+            _uniclassStrings.AddRange(tempStrings);
+
+            // Indexar por palavras-chave
+            for (int i = 0; i < _database.Count; i++)
+            {
+                var item = _database[i];
+
+                // Indexar categoria
+                string cat = item.Category?.ToLowerInvariant() ?? "unknown";
+                if (!_categoryIndex.ContainsKey(cat))
+                    _categoryIndex[cat] = new List<int>();
+                _categoryIndex[cat].Add(i);
+
+                // Indexar keywords
+                if (item.Keywords != null)
+                {
+                    foreach (var keyword in item.Keywords)
+                    {
+                        string key = keyword.ToLowerInvariant();
+                        if (!_keywordIndex.ContainsKey(key))
+                            _keywordIndex[key] = new List<int>();
+                        _keywordIndex[key].Add(i);
+                    }
+                }
+            }
+        }
+
+        private static string LoadDatabaseJson()
+        {
+            try
+            {
+                var assembly = Assembly.GetExecutingAssembly();
+                var resourceName = "CoordinatorPro.uniclass2015.json";
+
+                using (Stream stream = assembly.GetManifestResourceStream(resourceName))
+                {
+                    if (stream != null)
+                    {
+                        using (StreamReader reader = new StreamReader(stream))
+                        {
+                            return reader.ReadToEnd();
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                string assemblyPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                string jsonPath = Path.Combine(assemblyPath, "uniclass2015.json");
+
+                if (File.Exists(jsonPath))
+                {
+                    return File.ReadAllText(jsonPath);
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        // ‚úÖ CLASSIFICA√á√ÉO ULTRA-R√ÅPIDA
+        public static ClassificationResult Classify(Dictionary<string, string> elementData)
+        {
+            if (elementData == null || !elementData.Any())
+                return CreateErrorResult("Dados vazios");
+
+            if (_database == null || !_database.Any())
+                return CreateErrorResult("Base n√£o carregada");
+
+            // ‚úÖ CACHE COM CONCORR√äNCIA
+            string cacheKey = BuildCacheKey(elementData);
+
+            if (!string.IsNullOrEmpty(cacheKey) && _cache.TryGetValue(cacheKey, out string cachedResult))
+            {
+                return new ClassificationResult
+                {
+                    Code = cachedResult,
+                    Confidence = 100,
+                    Source = "Cache"
+                };
+            }
+
+            // ‚úÖ BUSCA INTELIGENTE COM FILTRO AGRESSIVO
+            List<int> targetIndices = GetTargetIndicesFast(elementData);
+
+            if (!targetIndices.Any())
+            {
+                return new ClassificationResult
+                {
+                    Code = "NC - Sem correspond√™ncia",
+                    Confidence = 0,
+                    Source = "NoMatch"
+                };
+            }
+
+            // ‚úÖ BUSCAR APENAS NOS TOP 100 CANDIDATOS (n√£o todos!)
+            int maxCandidates = Math.Min(100, targetIndices.Count);
+            var topCandidates = targetIndices.Take(maxCandidates).ToList();
+            var filteredStrings = topCandidates.Select(i => _uniclassStrings[i]).ToList();
+
+            // Construir string de busca simplificada
+            string searchString = BuildSimpleSearchString(elementData);
+
+            if (string.IsNullOrEmpty(searchString))
+                return CreateErrorResult("Sem dados");
+
+            // ‚úÖ FUZZY MATCH APENAS EM TOP 100
+            var results = FuzzySharp.Process.ExtractTop(
+                searchString,
+                filteredStrings,
+                limit: 1, // ‚úÖ APENAS O MELHOR (n√£o 3, n√£o 5)
+                cutoff: DEFAULT_CUTOFF
+            );
+
+            if (results != null && results.Any())
+            {
+                var best = results.First();
+                int localIndex = filteredStrings.IndexOf(best.Value);
+                int globalIndex = topCandidates[localIndex];
+
+                if (globalIndex >= 0 && globalIndex < _database.Count)
+                {
+                    var item = _database[globalIndex];
+                    string classification = $"{item.Code} - {item.Title}";
+
+                    // Adicionar ao cache
+                    if (best.Score > HIGH_CONFIDENCE_THRESHOLD && !string.IsNullOrEmpty(cacheKey))
+                    {
+                        _cache.TryAdd(cacheKey, classification);
+                    }
+
+                    return new ClassificationResult
+                    {
+                        Code = classification,
+                        Confidence = best.Score,
+                        Source = "FuzzyMatch",
+                        Alternatives = new List<string>() // ‚úÖ SEM ALTERNATIVAS = MAIS R√ÅPIDO
+                    };
+                }
+            }
+
+            return new ClassificationResult
+            {
+                Code = "NC - N√£o Classificado",
+                Confidence = 0,
+                Source = "NoMatch"
+            };
+        }
+
+        // ‚úÖ FILTRO ULTRA-AGRESSIVO
+        private static List<int> GetTargetIndicesFast(Dictionary<string, string> elementData)
+        {
+            var indices = new HashSet<int>();
+
+            // Filtrar por categoria mapeada
+            if (elementData.ContainsKey("Category") && !string.IsNullOrEmpty(elementData["Category"]))
+            {
+                string revitCategory = elementData["Category"];
+
+                if (CategoryMapping.TryGetValue(revitCategory, out string mappedKeyword))
+                {
+                    // Buscar diretamente no √≠ndice de keywords
+                    if (_keywordIndex.TryGetValue(mappedKeyword, out var keywordIndices))
+                    {
+                        foreach (var idx in keywordIndices)
+                            indices.Add(idx);
+                    }
+
+                    // Se encontrou muitos (>200), retornar s√≥ os primeiros
+                    if (indices.Count > 200)
+                        return indices.Take(200).ToList();
+                }
+            }
+
+            // Se filtro muito pequeno, expandir um pouco
+            if (indices.Count < 20)
+            {
+                // Adicionar alguns itens de categorias gen√©ricas
+                if (_categoryIndex.TryGetValue("products", out var productIndices))
+                {
+                    foreach (var idx in productIndices.Take(50))
+                        indices.Add(idx);
+                }
+            }
+
+            return indices.ToList();
+        }
+
+        // ‚úÖ STRING DE BUSCA SIMPLIFICADA
+        private static string BuildSimpleSearchString(Dictionary<string, string> elementData)
+        {
+            var parts = new List<string>();
+
+            // Apenas categoria mapeada + type
+            if (elementData.ContainsKey("Category") && !string.IsNullOrEmpty(elementData["Category"]))
+            {
+                string category = elementData["Category"];
+                if (CategoryMapping.TryGetValue(category, out string mapped))
+                    parts.Add(mapped);
+            }
+
+            if (elementData.ContainsKey("Type") && !string.IsNullOrEmpty(elementData["Type"]))
+            {
+                parts.Add(elementData["Type"]);
+            }
+
+            return string.Join(" ", parts).Trim().ToLowerInvariant();
+        }
+
+        private static string BuildCacheKey(Dictionary<string, string> elementData)
+        {
+            // Cache apenas por Category + Type (n√£o Family)
+            var parts = new List<string>();
+
+            if (elementData.TryGetValue("Category", out string cat))
+                parts.Add(cat);
+            if (elementData.TryGetValue("Type", out string type))
+                parts.Add(type);
+
+            return parts.Any() ? string.Join("|", parts) : null;
+        }
+
+        private static ClassificationResult CreateErrorResult(string errorMessage)
+        {
+            return new ClassificationResult
+            {
+                Code = $"NC - {errorMessage}",
+                Confidence = 0,
+                Source = "Error"
+            };
+        }
+
+        public static void ClearCache()
+        {
+            _cache.Clear();
+        }
+
+        public static string GetStatistics()
+        {
+            return $"Base: {(_database?.Count ?? 0)} | Cache: {_cache.Count} | √çndice Keywords: {_keywordIndex?.Count ?? 0}";
+        }
+
         public static void TestClassification()
         {
-            // Inicializar se necess·rio
-            if (!ClassificationService.Initialize())
+            if (!Initialize())
             {
-                System.Diagnostics.Debug.WriteLine("Falha ao inicializar ClassificationService");
+                System.Diagnostics.Debug.WriteLine("Falha ao inicializar");
                 return;
             }
 
-            // Dados de teste para diferentes tipos de elementos
-            var testData = new Dictionary<string, Dictionary<string, string>>
+            var testData = new Dictionary<string, string>
             {
-                {
-                    "Parede",
-                    new Dictionary<string, string>
-                    {
-                        {"Category", "Walls"},
-                        {"Family", "Basic Wall"},
-                        {"Type", "Generic - 200mm"},
-                        {"Description", "Parede externa"}
-                    }
-                },
-                {
-                    "Porta",
-                    new Dictionary<string, string>
-                    {
-                        {"Category", "Doors"},
-                        {"Family", "Single-Flush"},
-                        {"Type", "36\" x 84\""},
-                        {"Description", "Porta de entrada"}
-                    }
-                },
-                {
-                    "Janela",
-                    new Dictionary<string, string>
-                    {
-                        {"Category", "Windows"},
-                        {"Family", "Fixed"},
-                        {"Type", "24\" x 36\""},
-                        {"Description", "Janela fixa"}
-                    }
-                }
+                {"Category", "Walls"},
+                {"Type", "Generic - 200mm"}
             };
 
-            System.Diagnostics.Debug.WriteLine("=== TESTE DE CLASSIFICA«√O ===");
-            
-            foreach (var testCase in testData)
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            // Testar 100x para medir performance
+            for (int i = 0; i < 100; i++)
             {
-                System.Diagnostics.Debug.WriteLine($"\n--- Testando: {testCase.Key} ---");
-                
-                var result = ClassificationService.Classify(testCase.Value);
-                
-                System.Diagnostics.Debug.WriteLine($"Resultado: {result.Code}");
-                System.Diagnostics.Debug.WriteLine($"ConfianÁa: {result.Confidence}%");
-                System.Diagnostics.Debug.WriteLine($"Fonte: {result.Source}");
-                
-                if (result.Alternatives != null && result.Alternatives.Any())
-                {
-                    System.Diagnostics.Debug.WriteLine("Alternativas:");
-                    foreach (var alt in result.Alternatives)
-                        System.Diagnostics.Debug.WriteLine($"  {alt}");
-                }
-                
-                // Mostrar debug info
-                string debugInfo = ClassificationService.GetClassificationDebugInfo(testCase.Value);
-                System.Diagnostics.Debug.WriteLine(debugInfo);
+                var result = Classify(testData);
             }
+
+            sw.Stop();
+
+            System.Diagnostics.Debug.WriteLine($"100 classifica√ß√µes em {sw.ElapsedMilliseconds}ms");
+            System.Diagnostics.Debug.WriteLine($"M√©dia: {sw.ElapsedMilliseconds / 100.0}ms por elemento");
+        }
+
+        public static string GetClassificationDebugInfo(Dictionary<string, string> elementData)
+        {
+            string searchString = BuildSimpleSearchString(elementData);
+            List<int> targetIndices = GetTargetIndicesFast(elementData);
+            return $"Search: '{searchString}' | Candidates: {targetIndices.Count}";
         }
     }
 }
