@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using CoordinatorPro.Models;
 using Newtonsoft.Json;
-using OfficeOpenXml;
+using Newtonsoft.Json.Linq;
 
 namespace CoordinatorPro.Services
 {
@@ -54,8 +54,8 @@ namespace CoordinatorPro.Services
 
             try
             {
-                // ✅ LER APENAS DO EXCEL (SEM FALLBACK)
-                _database = LoadFromExcel();
+                // ✅ LER APENAS DO JSON
+                _database = LoadFromJson();
 
                 if (_database == null || !_database.Any())
                 {
@@ -67,7 +67,7 @@ namespace CoordinatorPro.Services
                 // CONSTRUIR ÍNDICES
                 BuildOptimizedIndex();
 
-                System.Diagnostics.Debug.WriteLine($"✓ Base carregada do Excel: {_database.Count} itens");
+                System.Diagnostics.Debug.WriteLine($"✓ Base carregada do JSON: {_database.Count} itens");
                 System.Diagnostics.Debug.WriteLine($"✓ Índice Keywords: {_keywordIndex?.Count ?? 0}");
                 System.Diagnostics.Debug.WriteLine($"✓ Cache pronto");
 
@@ -82,20 +82,26 @@ namespace CoordinatorPro.Services
         }
 
         /// <summary>
-        /// ✅ LÊ APENAS DO EXCEL - SEM FALLBACK JSON
+        /// ✅ LÊ APENAS DO JSON
         /// </summary>
-        private static List<UniClassItem> LoadFromExcel()
+        private static List<UniClassItem> LoadFromJson()
         {
             try
             {
-                // Procurar Excel na pasta da DLL
+                // Procurar JSON na pasta da DLL
                 string assemblyPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                string excelPath = Path.Combine(assemblyPath, "Uniclass2015_Pr_v1_39.xlsx");
+                string jsonPath = Path.Combine(assemblyPath, "Pr_Uniclass.json");
 
-                if (!File.Exists(excelPath))
+                // Tentar nome alternativo se não encontrar
+                if (!File.Exists(jsonPath))
                 {
-                    System.Diagnostics.Debug.WriteLine($"✗ ERRO: Excel não encontrado!");
-                    System.Diagnostics.Debug.WriteLine($"   Caminho esperado: {excelPath}");
+                    jsonPath = Path.Combine(assemblyPath, "Uniclass2015_Pr_v1_39.json");
+                }
+
+                if (!File.Exists(jsonPath))
+                {
+                    System.Diagnostics.Debug.WriteLine($"✗ ERRO: JSON não encontrado!");
+                    System.Diagnostics.Debug.WriteLine($"   Caminho esperado: {jsonPath}");
                     System.Diagnostics.Debug.WriteLine($"   Pasta atual: {assemblyPath}");
 
                     // Listar arquivos na pasta para debug
@@ -111,79 +117,92 @@ namespace CoordinatorPro.Services
                     return null;
                 }
 
-                System.Diagnostics.Debug.WriteLine($"✓ Excel encontrado: {excelPath}");
-
-                // Configurar licença EPPlus
-                ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+                System.Diagnostics.Debug.WriteLine($"✓ JSON encontrado: {jsonPath}");
 
                 var items = new List<UniClassItem>();
 
-                using (var package = new ExcelPackage(new FileInfo(excelPath)))
+                // Ler e parsear JSON
+                string jsonContent = File.ReadAllText(jsonPath);
+                var jsonData = JObject.Parse(jsonContent);
+
+                // Verificar estrutura básica
+                if (!jsonData.ContainsKey("items"))
                 {
-                    if (package.Workbook.Worksheets.Count == 0)
-                    {
-                        System.Diagnostics.Debug.WriteLine("✗ ERRO: Excel não tem abas");
-                        return null;
-                    }
-
-                    var worksheet = package.Workbook.Worksheets[0];
-                    int rowCount = worksheet.Dimension?.Rows ?? 0;
-
-                    if (rowCount < 2)
-                    {
-                        System.Diagnostics.Debug.WriteLine("✗ ERRO: Excel vazio ou sem dados");
-                        return null;
-                    }
-
-                    System.Diagnostics.Debug.WriteLine($"✓ Lendo {rowCount} linhas do Excel...");
-
-                    // Ler dados (linha 1 = header, dados começam na linha 2)
-                    int itemsLoaded = 0;
-
-                    for (int row = 2; row <= rowCount; row++)
-                    {
-                        try
-                        {
-                            string code = worksheet.Cells[row, 1].Value?.ToString()?.Trim();
-                            string title = worksheet.Cells[row, 7].Value?.ToString()?.Trim();
-
-                            // Pular linhas vazias
-                            if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(title))
-                                continue;
-
-                            var item = new UniClassItem
-                            {
-                                Code = code,
-                                Title = title,
-                                Keywords = ExtractKeywordsFromTitle(title),
-                                Category = DetermineCategory(code),
-                                Level = GetLevelFromCode(code),
-                                Parent = GetParentCode(code)
-                            };
-
-                            items.Add(item);
-                            itemsLoaded++;
-                        }
-                        catch (Exception ex)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"⚠ Erro na linha {row}: {ex.Message}");
-                        }
-                    }
-
-                    System.Diagnostics.Debug.WriteLine($"✓ {itemsLoaded} itens carregados com sucesso");
+                    System.Diagnostics.Debug.WriteLine("✗ ERRO: JSON não tem propriedade 'items'");
+                    return null;
                 }
+
+                var itemsObject = jsonData["items"] as JObject;
+                if (itemsObject == null)
+                {
+                    System.Diagnostics.Debug.WriteLine("✗ ERRO: 'items' não é um objeto válido");
+                    return null;
+                }
+
+                System.Diagnostics.Debug.WriteLine($"✓ Lendo {itemsObject.Count} itens do JSON...");
+
+                int itemsLoaded = 0;
+
+                // Processar cada item
+                foreach (var property in itemsObject.Properties())
+                {
+                    try
+                    {
+                        var itemData = property.Value as JObject;
+                        if (itemData == null)
+                            continue;
+
+                        string code = itemData["code"]?.ToString();
+                        string title = itemData["title"]?.ToString();
+
+                        // Pular itens sem code ou title
+                        if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(title))
+                            continue;
+
+                        var item = new UniClassItem
+                        {
+                            Code = code,
+                            Title = title,
+                            Keywords = ExtractKeywordsFromTitle(title),
+                            Category = DetermineCategory(code),
+                            Level = itemData["level"]?.ToObject<int>() ?? GetLevelFromCode(code),
+                            Parent = itemData["parent"]?.ToString()
+                        };
+
+                        items.Add(item);
+                        itemsLoaded++;
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"⚠ Erro ao processar item '{property.Name}': {ex.Message}");
+                    }
+                }
+
+                System.Diagnostics.Debug.WriteLine($"✓ {itemsLoaded} itens carregados com sucesso");
 
                 return items;
             }
             catch (FileNotFoundException ex)
             {
-                System.Diagnostics.Debug.WriteLine($"✗ ERRO: Arquivo Excel não encontrado");
+                System.Diagnostics.Debug.WriteLine($"✗ ERRO: Arquivo JSON não encontrado");
                 System.Diagnostics.Debug.WriteLine($"   {ex.Message}");
+                return null;
+            }
+            catch (JsonReaderException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"✗ ERRO ao ler JSON: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"   Linha: {ex.LineNumber}, Posição: {ex.LinePosition}");
+                return null;
+            }
+            catch (JsonException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"✗ ERRO ao parsear JSON: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"   Verifique se o arquivo JSON está bem formatado");
                 return null;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"✗ ERRO ao ler Excel: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"✗ ERRO ao ler JSON: {ex.Message}");
                 System.Diagnostics.Debug.WriteLine($"   Tipo: {ex.GetType().Name}");
                 System.Diagnostics.Debug.WriteLine($"   Stack: {ex.StackTrace}");
                 return null;

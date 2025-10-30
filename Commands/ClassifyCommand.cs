@@ -32,25 +32,26 @@ namespace CoordinatorPro.Commands
 
                 Document doc = uidoc.Document;
 
-                // ✅ Inicializar serviço (LÊ APENAS EXCEL)
+                // ✅ Inicializar serviço (LÊ APENAS JSON)
                 if (!ClassificationService.Initialize())
                 {
-                    // ✅ MENSAGEM DE ERRO MELHORADA
+                    // ✅ MENSAGEM DE ERRO MELHORADA PARA JSON
                     string assemblyPath = System.IO.Path.GetDirectoryName(
                         System.Reflection.Assembly.GetExecutingAssembly().Location
                     );
 
-                    string excelPath = System.IO.Path.Combine(assemblyPath, "Uniclass2015_Pr_v1_39.xlsx");
+                    string jsonPath = System.IO.Path.Combine(assemblyPath, "Uniclass2015_Pr_v1_39.json");
 
                     string errorMessage = "Falha ao inicializar base de dados UniClass.\n\n" +
-                                        "ERRO: Arquivo Excel não encontrado!\n\n" +
-                                        $"📁 Caminho esperado:\n{excelPath}\n\n" +
+                                        "ERRO: Arquivo JSON não encontrado!\n\n" +
+                                        $"📁 Caminho esperado:\n{jsonPath}\n\n" +
                                         "✅ SOLUÇÃO:\n" +
-                                        "1. Copie o arquivo 'Uniclass2015_Pr_v1_39.xlsx'\n" +
+                                        "1. Copie o arquivo 'Uniclass2015_Pr_v1_39.json'\n" +
                                         "   para a pasta acima\n\n" +
                                         "2. Certifique-se que o nome está correto\n" +
                                         "   (incluindo maiúsculas/minúsculas)\n\n" +
-                                        "3. Reinicie o Revit após copiar o arquivo";
+                                        "3. Verifique se o JSON está válido\n\n" +
+                                        "4. Reinicie o Revit após copiar o arquivo";
 
                     TaskDialog td = new TaskDialog("CoordinatorPro - Erro")
                     {
