@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Command">
+    <Assembly>CoordinatorPro\CoordinatorPro.dll</Assembly>
+    <FullClassName>CoordinatorPro.Commands.ClassifyCommand</FullClassName>
+    <ClientId>a7b8c9d0-1234-5678-9abc-def012345678</ClientId>
+    <Text>UniClass 2015</Text>
+    <Description>Classifica elementos usando UniClass 2015 e FuzzySharp</Description>
+    <VendorId>UC2015</VendorId>
+    <VendorDescription>Classificador Automático UniClass</VendorDescription>
+    <VisibilityMode>AlwaysVisible</VisibilityMode>
+  </AddIn>
+</RevitAddIns>
