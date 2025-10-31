@@ -1,237 +1,267 @@
+ï»¿using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using Newtonsoft.Json;
+using System.Linq;
 
 namespace CoordinatorPro.Utils
 {
     /// <summary>
-    /// Gerenciador de configurações persistentes do aplicativo
+    /// Gerenciador de configuraÃ§Ãµes persistentes do aplicativo
     /// </summary>
-public static class SettingsManager
+    public static class SettingsManager
     {
         private static readonly string AppDataFolder = Path.Combine(
-          Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-         "UniClassClassifier"
-);
-        
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "UniClassClassifier"
+        );
+
         private static readonly string SettingsFilePath = Path.Combine(AppDataFolder, "settings.json");
-        
-  private static Settings _cachedSettings;
-        
+
+        private static Settings _cachedSettings;
+
         /// <summary>
-     /// Classe de configurações do aplicativo
+        /// Classe de configuraÃ§Ãµes do aplicativo
         /// </summary>
         public class Settings
         {
-   /// <summary>
-   /// Último parâmetro selecionado pelo usuário
-/// </summary>
-        public string LastParameter { get; set; } = "Comments";
-            
-  /// <summary>
-/// Se deve mostrar janela de progresso
-    /// </summary>
+            /// <summary>
+            /// Ãšltimo parÃ¢metro selecionado pelo usuÃ¡rio
+            /// </summary>
+            public string LastParameter { get; set; } = "Comments";
+
+            /// <summary>
+            /// Se deve mostrar janela de progresso
+            /// </summary>
             public bool ShowProgress { get; set; } = true;
-       
-     /// <summary>
-        /// Se deve lembrar a escolha do parâmetro
-      /// </summary>
-    public bool RememberChoice { get; set; } = true;
-     
-         /// <summary>
-      /// Confiança mínima para classificação automática (0-100)
-    /// </summary>
+
+            /// <summary>
+            /// Se deve lembrar a escolha do parÃ¢metro
+            /// </summary>
+            public bool RememberChoice { get; set; } = true;
+
+            /// <summary>
+            /// ConfianÃ§a mÃ­nima para classificaÃ§Ã£o automÃ¡tica (0-100)
+            /// </summary>
             public int MinConfidence { get; set; } = 70;
-       
-    /// <summary>
-            /// Mapeamentos personalizados de categoria para código UniClass
+
+            /// <summary>
+            /// âœ… NOVO: ParÃ¢metros selecionados para usar no mapeamento/classificaÃ§Ã£o
+            /// </summary>
+            public List<string> MappingParameters { get; set; } = new List<string>
+            {
+                "Mark", "Type Mark", "Description"
+            };
+
+            /// <summary>
+            /// âœ… NOVO: NÃ­vel de classificaÃ§Ã£o desejado (1-4)
+            /// 1 = Pr
+            /// 2 = Pr_15
+            /// 3 = Pr_15_31
+            /// 4 = Pr_15_31_05 (mÃ¡ximo detalhe)
+            /// </summary>
+            public int ClassificationLevel { get; set; } = 4;
+
+            /// <summary>
+            /// Mapeamentos personalizados de categoria para cÃ³digo UniClass
             /// </summary>
             public Dictionary<string, string> CategoryMappings { get; set; } = new Dictionary<string, string>();
-    
-   /// <summary>
-        /// Última vez que as configurações foram salvas
- /// </summary>
-        public DateTime LastSaved { get; set; } = DateTime.Now;
-         
+
             /// <summary>
-   /// Versão das configurações
-   /// </summary>
-public string Version { get; set; } = "1.0";
+            /// Ãšltima vez que as configuraÃ§Ãµes foram salvas
+            /// </summary>
+            public DateTime LastSaved { get; set; } = DateTime.Now;
+
+            /// <summary>
+            /// VersÃ£o das configuraÃ§Ãµes
+            /// </summary>
+            public string Version { get; set; } = "1.2";
         }
-        
-  /// <summary>
-    /// Carrega configurações do arquivo ou retorna padrões
+
+        /// <summary>
+        /// Carrega configuraÃ§Ãµes do arquivo ou retorna padrÃµes
         /// </summary>
         public static Settings Load()
         {
-            // Retornar cache se disponível
-      if (_cachedSettings != null)
-  return _cachedSettings;
-   
-      try
-    {
-      if (File.Exists(SettingsFilePath))
-          {
-           string json = File.ReadAllText(SettingsFilePath);
-  
-     if (!string.IsNullOrWhiteSpace(json))
+            // Retornar cache se disponÃ­vel
+            if (_cachedSettings != null)
+                return _cachedSettings;
+
+            try
             {
-            var settings = JsonConvert.DeserializeObject<Settings>(json);
-           
-              if (settings != null)
-            {
-              _cachedSettings = ValidateSettings(settings);
-     return _cachedSettings;
-          }
-  }
-       }
-        }
+                if (File.Exists(SettingsFilePath))
+                {
+                    string json = File.ReadAllText(SettingsFilePath);
+
+                    if (!string.IsNullOrWhiteSpace(json))
+                    {
+                        var settings = JsonConvert.DeserializeObject<Settings>(json);
+
+                        if (settings != null)
+                        {
+                            _cachedSettings = ValidateSettings(settings);
+                            return _cachedSettings;
+                        }
+                    }
+                }
+            }
             catch (JsonException jsonEx)
             {
- System.Diagnostics.Debug.WriteLine($"Erro ao deserializar configurações: {jsonEx.Message}");
-           // Fazer backup do arquivo corrompido
-    BackupCorruptedSettings();
+                System.Diagnostics.Debug.WriteLine($"Erro ao deserializar configuraÃ§Ãµes: {jsonEx.Message}");
+                // Fazer backup do arquivo corrompido
+                BackupCorruptedSettings();
             }
-         catch (IOException ioEx)
-        {
-         System.Diagnostics.Debug.WriteLine($"Erro de I/O ao carregar configurações: {ioEx.Message}");
-    }
+            catch (IOException ioEx)
+            {
+                System.Diagnostics.Debug.WriteLine($"Erro de I/O ao carregar configuraÃ§Ãµes: {ioEx.Message}");
+            }
             catch (Exception ex)
             {
-           System.Diagnostics.Debug.WriteLine($"Erro ao carregar configurações: {ex.Message}");
-      }
-            
-            // Retornar configurações padrão
+                System.Diagnostics.Debug.WriteLine($"Erro ao carregar configuraÃ§Ãµes: {ex.Message}");
+            }
+
+            // Retornar configuraÃ§Ãµes padrÃ£o
             _cachedSettings = new Settings();
-      return _cachedSettings;
+            return _cachedSettings;
         }
-        
-   /// <summary>
-    /// Salva configurações no arquivo
+
+        /// <summary>
+        /// Salva configuraÃ§Ãµes no arquivo
         /// </summary>
         public static bool Save(Settings settings)
         {
-        if (settings == null)
-    return false;
-     
-          try
-     {
-  // Criar diretório se não existir
-            if (!Directory.Exists(AppDataFolder))
-     {
-          Directory.CreateDirectory(AppDataFolder);
-     }
-         
-         // Atualizar timestamp
-    settings.LastSaved = DateTime.Now;
-                
-      // Serializar com formatação
-        string json = JsonConvert.SerializeObject(settings, Formatting.Indented);
-            
-      // Escrever arquivo
-        File.WriteAllText(SettingsFilePath, json);
-       
-                // Atualizar cache
-        _cachedSettings = settings;
-        
-    return true;
-        }
-        catch (JsonException jsonEx)
-{
-         System.Diagnostics.Debug.WriteLine($"Erro ao serializar configurações: {jsonEx.Message}");
-  return false;
-      }
-          catch (IOException ioEx)
-    {
-                System.Diagnostics.Debug.WriteLine($"Erro de I/O ao salvar configurações: {ioEx.Message}");
-     return false;
- }
-    catch (Exception ex)
-   {
-       System.Diagnostics.Debug.WriteLine($"Erro ao salvar configurações: {ex.Message}");
-  return false;
-      }
-        }
-    
-        /// <summary>
-        /// Valida e corrige configurações carregadas
-  /// </summary>
-        private static Settings ValidateSettings(Settings settings)
-     {
-          // Validar MinConfidence
-       if (settings.MinConfidence < 0 || settings.MinConfidence > 100)
+            if (settings == null)
+                return false;
+
+            try
             {
- settings.MinConfidence = 70;
+                // Criar diretÃ³rio se nÃ£o existir
+                if (!Directory.Exists(AppDataFolder))
+                {
+                    Directory.CreateDirectory(AppDataFolder);
+                }
+
+                // Atualizar timestamp
+                settings.LastSaved = DateTime.Now;
+
+                // Serializar com formataÃ§Ã£o
+                string json = JsonConvert.SerializeObject(settings, Formatting.Indented);
+
+                // Escrever arquivo
+                File.WriteAllText(SettingsFilePath, json);
+
+                // Atualizar cache
+                _cachedSettings = settings;
+
+                return true;
             }
-     
-// Validar CategoryMappings
-            if (settings.CategoryMappings == null)
-       {
-       settings.CategoryMappings = new Dictionary<string, string>();
+            catch (JsonException jsonEx)
+            {
+                System.Diagnostics.Debug.WriteLine($"Erro ao serializar configuraÃ§Ãµes: {jsonEx.Message}");
+                return false;
             }
-            
-     // Validar LastParameter
-            if (string.IsNullOrWhiteSpace(settings.LastParameter))
-          {
-        settings.LastParameter = "Comments";
-     }
-    
-        return settings;
+            catch (IOException ioEx)
+            {
+                System.Diagnostics.Debug.WriteLine($"Erro de I/O ao salvar configuraÃ§Ãµes: {ioEx.Message}");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Erro ao salvar configuraÃ§Ãµes: {ex.Message}");
+                return false;
+            }
         }
-    
-      /// <summary>
-      /// Faz backup de arquivo de configurações corrompido
+
+        /// <summary>
+        /// Valida e corrige configuraÃ§Ãµes carregadas
+        /// </summary>
+        private static Settings ValidateSettings(Settings settings)
+        {
+            // Validar MinConfidence
+            if (settings.MinConfidence < 0 || settings.MinConfidence > 100)
+            {
+                settings.MinConfidence = 70;
+            }
+
+            // Validar CategoryMappings
+            if (settings.CategoryMappings == null)
+            {
+                settings.CategoryMappings = new Dictionary<string, string>();
+            }
+
+            // Validar LastParameter
+            if (string.IsNullOrWhiteSpace(settings.LastParameter))
+            {
+                settings.LastParameter = "Comments";
+            }
+
+            // âœ… NOVO: Validar MappingParameters
+            if (settings.MappingParameters == null || !settings.MappingParameters.Any())
+            {
+                settings.MappingParameters = new List<string> { "Mark", "Type Mark", "Description" };
+            }
+
+            // âœ… NOVO: Validar ClassificationLevel
+            if (settings.ClassificationLevel < 1 || settings.ClassificationLevel > 4)
+            {
+                settings.ClassificationLevel = 4; // PadrÃ£o: nÃ­vel mÃ¡ximo
+            }
+
+            return settings;
+        }
+
+        /// <summary>
+        /// Faz backup de arquivo de configuraÃ§Ãµes corrompido
         /// </summary>
         private static void BackupCorruptedSettings()
-      {
-          try
-      {
- if (File.Exists(SettingsFilePath))
-     {
-  string backupPath = SettingsFilePath + $".backup_{DateTime.Now:yyyyMMddHHmmss}";
-            File.Copy(SettingsFilePath, backupPath, true);
-             System.Diagnostics.Debug.WriteLine($"Backup criado em: {backupPath}");
-    }
-    }
-     catch
-   {
-  // Ignorar erros de backup
-       }
+        {
+            try
+            {
+                if (File.Exists(SettingsFilePath))
+                {
+                    string backupPath = SettingsFilePath + $".backup_{DateTime.Now:yyyyMMddHHmmss}";
+                    File.Copy(SettingsFilePath, backupPath, true);
+                    System.Diagnostics.Debug.WriteLine($"Backup criado em: {backupPath}");
+                }
+            }
+            catch
+            {
+                // Ignorar erros de backup
+            }
         }
-        
- /// <summary>
-     /// Reseta configurações para padrões
-     /// </summary>
+
+        /// <summary>
+        /// Reseta configuraÃ§Ãµes para padrÃµes
+        /// </summary>
         public static Settings Reset()
         {
             _cachedSettings = new Settings();
             Save(_cachedSettings);
-      return _cachedSettings;
+            return _cachedSettings;
         }
-        
-/// <summary>
-     /// Limpa o cache de configurações
+
+        /// <summary>
+        /// Limpa o cache de configuraÃ§Ãµes
         /// </summary>
         public static void ClearCache()
         {
-       _cachedSettings = null;
- }
-        
+            _cachedSettings = null;
+        }
+
         /// <summary>
-     /// Obtém caminho do arquivo de configurações
+        /// ObtÃ©m caminho do arquivo de configuraÃ§Ãµes
         /// </summary>
         public static string GetSettingsPath()
         {
-   return SettingsFilePath;
-}
-        
- /// <summary>
-      /// Verifica se arquivo de configurações existe
+            return SettingsFilePath;
+        }
+
+        /// <summary>
+        /// Verifica se arquivo de configuraÃ§Ãµes existe
         /// </summary>
         public static bool SettingsFileExists()
         {
-  return File.Exists(SettingsFilePath);
+            return File.Exists(SettingsFilePath);
         }
-  }
+    }
 }

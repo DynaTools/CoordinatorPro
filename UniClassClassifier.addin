@@ -7,7 +7,7 @@
     <Text>UniClass 2015</Text>
     <Description>Classifica elementos usando UniClass 2015 e FuzzySharp</Description>
     <VendorId>UC2015</VendorId>
-    <VendorDescription>Classificador Automático UniClass</VendorDescription>
+    <VendorDescription>Classificador Automï¿½tico UniClass</VendorDescription>
     <VisibilityMode>AlwaysVisible</VisibilityMode>
   </AddIn>
 </RevitAddIns>

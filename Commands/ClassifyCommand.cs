@@ -91,6 +91,8 @@ namespace CoordinatorPro.Commands
                 // 4. MOSTRAR FORM DE SELEÇÃO
                 string targetParameter;
                 bool showProgress;
+                List<string> mappingParameters; // ✅ NOVO
+                int classificationLevel; // ✅ NOVO
 
                 using (var selectionForm = new ParameterSelectionForm(availableParams, elementsToClassify.Count))
                 {
@@ -99,10 +101,12 @@ namespace CoordinatorPro.Commands
 
                     targetParameter = selectionForm.SelectedParameter;
                     showProgress = selectionForm.ShowProgress;
+                    mappingParameters = selectionForm.SelectedMappingParameters; // ✅ NOVO
+                    classificationLevel = selectionForm.ClassificationLevel; // ✅ NOVO
                 }
 
-                // 5. PROCESSAR ELEMENTOS
-                var results = ClassifyElements(doc, elementsToClassify, targetParameter, showProgress);
+                // 5. PROCESSAR ELEMENTOS (✅ passa os parâmetros de mapeamento e nível)
+                var results = ClassifyElements(doc, elementsToClassify, targetParameter, showProgress, mappingParameters, classificationLevel);
 
                 // 6. MOSTRAR RESUMO
                 if (results != null && results.Any())
@@ -188,11 +192,14 @@ namespace CoordinatorPro.Commands
                    element.Id.IntegerValue > 0;
         }
 
+        // ✅ MODIFICADO: Agora recebe mappingParameters e classificationLevel
         private Dictionary<Element, ClassificationResult> ClassifyElements(
             Document doc,
             IList<Element> elements,
             string targetParameter,
-            bool showProgress)
+            bool showProgress,
+            List<string> mappingParameters,
+            int classificationLevel)
         {
             var results = new Dictionary<Element, ClassificationResult>();
             ProgressForm progressForm = null;
@@ -201,7 +208,8 @@ namespace CoordinatorPro.Commands
             {
                 if (showProgress)
                 {
-                    progressForm = new ProgressForm();
+                    progressForm = new ProgressForm(mappingParameters); // ✅ Passa parâmetros
+                    progressForm.SetDocument(doc); // ✅ Passa document
                     progressForm.Show();
                     WinForms.Application.DoEvents();
                 }
@@ -226,18 +234,18 @@ namespace CoordinatorPro.Commands
                                 return results;
                             }
 
-                            // Coletar dados do elemento
-                            var elementData = ParameterService.CollectElementData(element);
+                            // ✅ MODIFICADO: Passa mappingParameters
+                            var elementData = ParameterService.CollectElementData(element, mappingParameters);
 
-                            // Classificar
-                            var result = ClassificationService.Classify(elementData);
+                            // ✅ MODIFICADO: Passa classificationLevel
+                            var result = ClassificationService.Classify(elementData, classificationLevel);
                             results[element] = result;
 
                             // DEBUG
                             if (result.Confidence == 0 && result.Source != "Error")
                             {
                                 string debugInfo = $"=== DEBUG ELEMENTO {current}/{total} ===\n" +
-                                    ParameterService.GetElementDataDebugInfo(element) + "\n" +
+                                    ParameterService.GetElementDataDebugInfo(element, mappingParameters) + "\n" +
                                     ClassificationService.GetClassificationDebugInfo(elementData);
 
                                 System.Diagnostics.Debug.WriteLine(debugInfo);
