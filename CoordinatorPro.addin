@@ -1,0 +1,10 @@
+<RevitAddIns>
+	<AddIn Type="Application">
+		<Name>CoordinatorPro</Name>
+		<Assembly>CoordinatorPro\CoordinatorPro.dll</Assembly>
+		<FullClassName>CoordinatorPro.CoordinatorProApp</FullClassName>
+		<ClientId>5F88CC31-D49B-4FAA-8F3D-41234567890F</ClientId>
+		<VendorId>CoordinatorPro</VendorId>
+		<VendorDescription>Professional Revit Coordination and Analysis Tools</VendorDescription>
+	</AddIn>
+</RevitAddIns>

@@ -192,7 +192,9 @@
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
     <None Include="FLUXOGRAMA.md" />
-    <None Include="Models\minilm-l6-v2.onnx" />
+    <Content Include="Models\minilm-l6-v2.onnx">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
     <None Include="packages.config" />
     <None Include="Prompt.md" />
     <None Include="Properties\Settings.settings">
@@ -205,9 +207,9 @@
       <DesignTimeSharedInput>True</DesignTimeSharedInput>
     </Compile>
     <None Include="README.md" />
-    <None Include="UniClassClassifier.addin" />
+    <None Include="CoordinatorPro.addin" />
     <Content Include="Pr_Uniclass.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
   <ItemGroup>

@@ -1,4 +1,5 @@
-﻿using System;
+﻿// Commands/ClassifyCommand.cs
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Revit.Attributes;
@@ -22,7 +23,6 @@ namespace CoordinatorPro.Commands
         {
             try
             {
-                // 1. PREPARAÇÃO
                 UIDocument uidoc = commandData.Application.ActiveUIDocument;
                 if (uidoc == null)
                 {
@@ -32,24 +32,19 @@ namespace CoordinatorPro.Commands
 
                 Document doc = uidoc.Document;
 
-                // ✅ Inicializar serviço (LÊ APENAS JSON)
                 if (!ClassificationService.Initialize())
                 {
-                    // ✅ MENSAGEM DE ERRO MELHORADA PARA JSON
                     string assemblyPath = System.IO.Path.GetDirectoryName(
                         System.Reflection.Assembly.GetExecutingAssembly().Location
                     );
 
-                    string jsonPath = System.IO.Path.Combine(assemblyPath, "Uniclass2015_Pr_v1_39.json");
-
                     string errorMessage = "Falha ao inicializar base de dados UniClass.\n\n" +
                                         "ERRO: Arquivo JSON não encontrado!\n\n" +
-                                        $"📁 Caminho esperado:\n{jsonPath}\n\n" +
+                                        $"📁 Pasta verificada:\n{assemblyPath}\n\n" +
                                         "✅ SOLUÇÃO:\n" +
-                                        "1. Copie o arquivo 'Uniclass2015_Pr_v1_39.json'\n" +
+                                        "1. Copie o arquivo JSON (Pr_Uniclass.json ou Uniclass2015_Pr_v1_39.json)\n" +
                                         "   para a pasta acima\n\n" +
-                                        "2. Certifique-se que o nome está correto\n" +
-                                        "   (incluindo maiúsculas/minúsculas)\n\n" +
+                                        "2. Certifique-se que o nome está correto\n\n" +
                                         "3. Verifique se o JSON está válido\n\n" +
                                         "4. Reinicie o Revit após copiar o arquivo";
 
@@ -66,10 +61,8 @@ namespace CoordinatorPro.Commands
                     return Result.Failed;
                 }
 
-                // DEBUG: Executar teste de classificação
                 ClassificationService.TestClassification();
 
-                // 2. SELEÇÃO DE ELEMENTOS
                 IList<Element> elementsToClassify = GetElementsToClassify(uidoc);
                 if (elementsToClassify == null || !elementsToClassify.Any())
                 {
@@ -77,7 +70,6 @@ namespace CoordinatorPro.Commands
                     return Result.Cancelled;
                 }
 
-                // 3. COLETAR PARÂMETROS DISPONÍVEIS
                 List<string> availableParams = ParameterService.GetEditableParameters(doc, elementsToClassify.First());
 
                 if (!availableParams.Any())
@@ -88,11 +80,10 @@ namespace CoordinatorPro.Commands
                     return Result.Cancelled;
                 }
 
-                // 4. MOSTRAR FORM DE SELEÇÃO
                 string targetParameter;
                 bool showProgress;
-                List<string> mappingParameters; // ✅ NOVO
-                int classificationLevel; // ✅ NOVO
+                List<string> mappingParameters;
+                int classificationLevel;
 
                 using (var selectionForm = new ParameterSelectionForm(availableParams, elementsToClassify.Count))
                 {
@@ -101,14 +92,12 @@ namespace CoordinatorPro.Commands
 
                     targetParameter = selectionForm.SelectedParameter;
                     showProgress = selectionForm.ShowProgress;
-                    mappingParameters = selectionForm.SelectedMappingParameters; // ✅ NOVO
-                    classificationLevel = selectionForm.ClassificationLevel; // ✅ NOVO
+                    mappingParameters = selectionForm.SelectedMappingParameters;
+                    classificationLevel = selectionForm.ClassificationLevel;
                 }
 
-                // 5. PROCESSAR ELEMENTOS (✅ passa os parâmetros de mapeamento e nível)
                 var results = ClassifyElements(doc, elementsToClassify, targetParameter, showProgress, mappingParameters, classificationLevel);
 
-                // 6. MOSTRAR RESUMO
                 if (results != null && results.Any())
                 {
                     ShowSummary(results);
@@ -137,7 +126,6 @@ namespace CoordinatorPro.Commands
             {
                 var selectedIds = uidoc.Selection.GetElementIds();
 
-                // Tentar usar seleção atual
                 if (selectedIds.Any())
                 {
                     var selectedElements = selectedIds
@@ -149,7 +137,6 @@ namespace CoordinatorPro.Commands
                         return selectedElements;
                 }
 
-                // Pedir nova seleção
                 TaskDialog td = new TaskDialog("Seleção de Elementos")
                 {
                     MainContent = "Nenhum elemento válido selecionado.\n\nDeseja selecionar elementos agora?",
@@ -192,7 +179,6 @@ namespace CoordinatorPro.Commands
                    element.Id.IntegerValue > 0;
         }
 
-        // ✅ MODIFICADO: Agora recebe mappingParameters e classificationLevel
         private Dictionary<Element, ClassificationResult> ClassifyElements(
             Document doc,
             IList<Element> elements,
@@ -208,8 +194,8 @@ namespace CoordinatorPro.Commands
             {
                 if (showProgress)
                 {
-                    progressForm = new ProgressForm(mappingParameters); // ✅ Passa parâmetros
-                    progressForm.SetDocument(doc); // ✅ Passa document
+                    progressForm = new ProgressForm(mappingParameters);
+                    progressForm.SetDocument(doc);
                     progressForm.Show();
                     WinForms.Application.DoEvents();
                 }
@@ -227,21 +213,16 @@ namespace CoordinatorPro.Commands
                         {
                             current++;
 
-                            // Verificar cancelamento
                             if (progressForm != null && progressForm.Cancelled)
                             {
                                 trans.RollBack();
                                 return results;
                             }
 
-                            // ✅ MODIFICADO: Passa mappingParameters
                             var elementData = ParameterService.CollectElementData(element, mappingParameters);
-
-                            // ✅ MODIFICADO: Passa classificationLevel
                             var result = ClassificationService.Classify(elementData, classificationLevel);
                             results[element] = result;
 
-                            // DEBUG
                             if (result.Confidence == 0 && result.Source != "Error")
                             {
                                 string debugInfo = $"=== DEBUG ELEMENTO {current}/{total} ===\n" +
@@ -251,7 +232,6 @@ namespace CoordinatorPro.Commands
                                 System.Diagnostics.Debug.WriteLine(debugInfo);
                             }
 
-                            // Atualizar parâmetro se confiança suficiente
                             if (result.Confidence > 0)
                             {
                                 bool updated = ParameterService.SetParameterValue(doc, element, targetParameter, result.Code);
@@ -262,7 +242,6 @@ namespace CoordinatorPro.Commands
                                 }
                             }
 
-                            // Atualizar progresso
                             if (progressForm != null)
                             {
                                 progressForm.UpdateProgress(current, total, element, result);
@@ -278,7 +257,6 @@ namespace CoordinatorPro.Commands
                     }
                 }
 
-                // Mostrar resumo no form de progresso
                 if (progressForm != null)
                 {
                     progressForm.ShowSummary();

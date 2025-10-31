@@ -1,4 +1,5 @@
-﻿using System;
+﻿// Services/ClassificationService.cs
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -16,6 +17,7 @@ namespace CoordinatorPro.Services
         private static List<UniClassItem> _database;
         private static ConcurrentDictionary<string, string> _cache = new ConcurrentDictionary<string, string>();
         private static Dictionary<string, float[]> _embeddingCache = new Dictionary<string, float[]>();
+        private static string _loadedJsonPath; // ✅ NOVO: guardar o caminho carregado
 
         private const int HIGH_CONFIDENCE_THRESHOLD = 80;
 
@@ -50,7 +52,7 @@ namespace CoordinatorPro.Services
 
                 PrecomputeEmbeddings();
 
-                System.Diagnostics.Debug.WriteLine($"Base carregada: {_database.Count} itens com embeddings");
+                System.Diagnostics.Debug.WriteLine($"Base carregada: {_database.Count} itens de {_loadedJsonPath}");
                 return true;
             }
             catch (Exception ex)
@@ -59,6 +61,12 @@ namespace CoordinatorPro.Services
                 _database = new List<UniClassItem>();
                 return false;
             }
+        }
+
+        // ✅ NOVO: Retornar o caminho do JSON carregado
+        public static string GetLoadedJsonPath()
+        {
+            return _loadedJsonPath;
         }
 
         private static void PrecomputeEmbeddings()
@@ -92,11 +100,11 @@ namespace CoordinatorPro.Services
             {
                 string assemblyPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
 
+                // ✅ ORDEM DE PRIORIDADE DOS NOMES
                 var candidateFileNames = new[]
                 {
-                    "Pr_Uniclass.json",
+                    "Pr_Uniclass.json",           // Nome atual do usuário
                     "Uniclass2015_Pr_v1_39.json",
-                    "Uniclass2015_Pr_v1_39.JSON",
                     "uniclass_products.json",
                     "Uniclass.json"
                 };
@@ -104,47 +112,48 @@ namespace CoordinatorPro.Services
                 var attemptedPaths = new List<string>();
                 string foundPath = null;
 
-                // Helper to check a directory for candidate files and also for any Uniclass*.json files
                 void CheckDirectory(string dir)
                 {
                     if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
                         return;
 
-                    try
+                    foreach (var name in candidateFileNames)
                     {
-                        foreach (var name in candidateFileNames)
+                        var p = Path.Combine(dir, name);
+                        attemptedPaths.Add(p);
+                        if (File.Exists(p) && foundPath == null)
                         {
-                            var p = Path.Combine(dir, name);
-                            attemptedPaths.Add(p);
-                            if (File.Exists(p) && foundPath == null)
-                                foundPath = p;
+                            foundPath = p;
+                            return;
                         }
+                    }
 
-                        if (foundPath == null)
+                    if (foundPath == null)
+                    {
+                        try
                         {
-                            // look for any file matching pattern
-                            var matches = Directory.GetFiles(dir, "Uniclass*.json", SearchOption.TopDirectoryOnly);
-                            foreach (var m in matches)
+                            var matches = Directory.GetFiles(dir, "*uniclass*.json", SearchOption.TopDirectoryOnly)
+                                .Concat(Directory.GetFiles(dir, "*Uniclass*.json", SearchOption.TopDirectoryOnly))
+                                .Concat(Directory.GetFiles(dir, "Pr_*.json", SearchOption.TopDirectoryOnly));
+
+                            foreach (var m in matches.Distinct())
                             {
                                 attemptedPaths.Add(m);
                                 if (foundPath == null)
+                                {
                                     foundPath = m;
+                                    return;
+                                }
                             }
                         }
+                        catch { }
                     }
-                    catch { }
                 }
 
-                // Check assembly folder
                 CheckDirectory(assemblyPath);
-
-                // Check current directory
                 CheckDirectory(Directory.GetCurrentDirectory());
-
-                // Check application base directory
                 CheckDirectory(AppDomain.CurrentDomain.BaseDirectory);
 
-                // Check common ProgramData Autodesk Revit Addins folder (where Revit add-ins are usually installed)
                 try
                 {
                     var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
@@ -153,7 +162,6 @@ namespace CoordinatorPro.Services
                         var revitAddins = Path.Combine(programData, "Autodesk", "Revit", "Addins");
                         CheckDirectory(revitAddins);
 
-                        // also check subfolders (yeared addin folders)
                         if (Directory.Exists(revitAddins))
                         {
                             foreach (var sub in Directory.GetDirectories(revitAddins))
@@ -165,11 +173,10 @@ namespace CoordinatorPro.Services
                 }
                 catch { }
 
-                // Walk up parent folders from assembly path to try to locate the JSON (up to3 levels)
                 try
                 {
                     var current = assemblyPath;
-                    for (int i =0; i <3 && !string.IsNullOrEmpty(current); i++)
+                    for (int i = 0; i < 3 && !string.IsNullOrEmpty(current); i++)
                     {
                         CheckDirectory(current);
                         var parent = Directory.GetParent(current);
@@ -181,17 +188,15 @@ namespace CoordinatorPro.Services
 
                 if (foundPath == null)
                 {
-                    // If still not found, write a clear debug message listing attempted locations
                     System.Diagnostics.Debug.WriteLine("JSON não encontrado. Caminhos verificados:");
                     foreach (var p in attemptedPaths.Distinct())
                     {
                         System.Diagnostics.Debug.WriteLine(p);
                     }
-
-                    System.Diagnostics.Debug.WriteLine("JSON não encontrado");
                     return null;
                 }
 
+                _loadedJsonPath = foundPath; // ✅ Guardar caminho
                 System.Diagnostics.Debug.WriteLine($"Carregando JSON de: {foundPath}");
 
                 var items = new List<UniClassItem>();
