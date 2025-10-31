@@ -179,6 +179,7 @@
     <Compile Include="Models\UniClassModels.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Services\ClassificationService.cs" />
+    <Compile Include="Services\EmbeddingService.cs" />
     <Compile Include="Services\ParameterService.cs" />
     <Compile Include="Utils\SettingsManager.cs" />
     <EmbeddedResource Include="Properties\Resources.resx">
@@ -191,6 +192,7 @@
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
     <None Include="FLUXOGRAMA.md" />
+    <None Include="Models\minilm-l6-v2.onnx" />
     <None Include="packages.config" />
     <None Include="Prompt.md" />
     <None Include="Properties\Settings.settings">

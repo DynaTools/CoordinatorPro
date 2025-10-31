@@ -15,119 +15,15 @@ namespace CoordinatorPro.Services
     {
         private static List<UniClassItem> _database;
         private static ConcurrentDictionary<string, string> _cache = new ConcurrentDictionary<string, string>();
+        private static Dictionary<string, float[]> _embeddingCache = new Dictionary<string, float[]>();
 
-        private static Dictionary<string, List<int>> _categoryIndex;
-        private static Dictionary<string, List<int>> _keywordIndex;
-        private static List<string> _uniclassStrings;
-
-        private const int DEFAULT_CUTOFF = 30; // ✅ Reduzido de 40 para 30 (mais permissivo)
         private const int HIGH_CONFIDENCE_THRESHOLD = 80;
 
-        private static readonly Dictionary<string, string> CategoryMapping = new Dictionary<string, string>
+        private static readonly HashSet<string> Antonyms = new HashSet<string>
         {
-            // ============ ARQUITETURA ============
-            {"Walls", "wall"},
-            {"Doors", "door"},
-            {"Windows", "window"},
-            {"Floors", "floor"},
-            {"Roofs", "roof"},
-            {"Ceilings", "ceiling"},
-            {"Curtain Panels", "panel"},
-            {"Curtain Wall Mullions", "mullion"},
-            {"Stairs", "stair"},
-            {"Railings", "railing"},
-            {"Ramps", "ramp"},
-            {"Columns", "column"},
-            {"Structural Columns", "column"},
-            {"Structural Framing", "beam"},
-            {"Structural Foundations", "foundation"},
-            {"Mass", "mass"},
-            {"Generic Models", "model"},
-            {"Casework", "casework"},
-            {"Furniture", "furniture"},
-            {"Furniture Systems", "furniture"},
-            {"Specialty Equipment", "equipment"},
-            {"Parking", "parking"},
-            {"Site", "site"},
-            {"Planting", "plant"},
-            {"Topography", "topography"},
-            
-            // ============ MEP - MECÂNICO ============
-            {"Mechanical Equipment", "mechanical"},
-            {"Air Terminals", "air"},
-            {"Ducts", "duct"},
-            {"Duct Fittings", "duct"},
-            {"Duct Accessories", "duct"},
-            {"Duct Insulations", "insulation"},
-            {"Duct Linings", "lining"},
-            {"Duct Placeholders", "duct"},
-            {"Flex Ducts", "duct"},
-            {"Mechanical Equipment Sets", "mechanical"},
-            
-            // ============ MEP - HIDRÁULICO ============
-            {"Plumbing Fixtures", "sanitary"},
-            {"Pipes", "pipe"},
-            {"Pipe Fittings", "pipe"},
-            {"Pipe Accessories", "pipe"},
-            {"Pipe Insulations", "insulation"},
-            {"Pipe Placeholders", "pipe"},
-            {"Flex Pipes", "pipe"},
-            {"Sprinklers", "sprinkler"},
-            
-            // ============ MEP - ELÉTRICO ============
-            {"Electrical Equipment", "electrical"},
-            {"Electrical Fixtures", "lighting"},
-            {"Lighting Fixtures", "lighting"},
-            {"Lighting Devices", "lighting"},
-            {"Cable Trays", "cable"},
-            {"Cable Tray Fittings", "cable"},
-            {"Conduits", "conduit"},
-            {"Conduit Fittings", "conduit"},
-            {"Communication Devices", "communication"},
-            {"Data Devices", "data"},
-            {"Fire Alarm Devices", "fire"},
-            {"Nurse Call Devices", "nurse"},
-            {"Security Devices", "security"},
-            {"Telephone Devices", "telephone"},
-            {"Lighting", "lighting"},
-            
-            // ============ EQUIPAMENTOS ESPECIALIZADOS ============
-            {"Food Service Equipment", "equipment"},
-            {"Medical Equipment", "equipment"},
-            {"Laboratory Equipment", "equipment"},
-            {"Commercial Equipment", "equipment"},
-            
-            // ============ ESTRUTURAL ============
-            {"Structural Beam Systems", "beam"},
-            {"Structural Connections", "connection"},
-            {"Structural Rebar", "rebar"},
-            {"Structural Stiffeners", "stiffener"},
-            {"Structural Trusses", "truss"},
-            {"Fabric Areas", "fabric"},
-            {"Fabric Reinforcement", "reinforcement"},
-            
-            // ============ SISTEMAS ============
-            {"Fire Protection", "fire"},
-            {"HVAC Zones", "zone"},
-            {"Piping Systems", "pipe"},
-            
-            // ============ ELEMENTOS ESPECIAIS ============
-            {"Entourage", "entourage"},
-            {"Curtain Systems", "curtain"},
-            {"Model Groups", "group"},
-            {"Parts", "part"},
-            {"Assemblies", "assembly"},
-            {"Areas", "area"},
-            {"Rooms", "room"},
-            {"Spaces", "space"},
-            
-            // ============ PADRÃO/FALLBACK ============
-            {"Generic Model", "model"},
-            {"Lines", "line"},
-            {"Fascia", "fascia"},
-            {"Gutter", "gutter"},
-            {"Shaft Openings", "opening"},
-            {"Vertical Circulation", "circulation"}
+            "interior|exterior", "internal|external", "inside|outside",
+            "upper|lower", "top|bottom", "left|right",
+            "front|back", "north|south", "east|west"
         };
 
         public static bool Initialize()
@@ -137,108 +33,190 @@ namespace CoordinatorPro.Services
 
             try
             {
-                // ✅ LER APENAS DO JSON
+                if (!EmbeddingService.Initialize())
+                {
+                    System.Diagnostics.Debug.WriteLine("Falha ao inicializar serviço de embeddings");
+                    return false;
+                }
+
                 _database = LoadFromJson();
 
                 if (_database == null || !_database.Any())
                 {
-                    System.Diagnostics.Debug.WriteLine("✗ ERRO: Base de dados vazia");
+                    System.Diagnostics.Debug.WriteLine("Base de dados vazia");
                     _database = new List<UniClassItem>();
                     return false;
                 }
 
-                // CONSTRUIR ÍNDICES
-                BuildOptimizedIndex();
+                PrecomputeEmbeddings();
 
-                System.Diagnostics.Debug.WriteLine($"✓ Base carregada do JSON: {_database.Count} itens");
-                System.Diagnostics.Debug.WriteLine($"✓ Índice Keywords: {_keywordIndex?.Count ?? 0}");
-                System.Diagnostics.Debug.WriteLine($"✓ Cache pronto");
-
+                System.Diagnostics.Debug.WriteLine($"Base carregada: {_database.Count} itens com embeddings");
                 return true;
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"✗ ERRO ao inicializar: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Erro ao inicializar: {ex.Message}");
                 _database = new List<UniClassItem>();
                 return false;
             }
         }
 
-        /// <summary>
-        /// ✅ LÊ APENAS DO JSON
-        /// </summary>
+        private static void PrecomputeEmbeddings()
+        {
+            System.Diagnostics.Debug.WriteLine("Pré-computando embeddings...");
+
+            Parallel.ForEach(_database, item =>
+            {
+                try
+                {
+                    string text = $"{item.Title} {string.Join(" ", item.Keywords ?? new List<string>())}";
+                    var embedding = EmbeddingService.GenerateEmbedding(text);
+
+                    lock (_embeddingCache)
+                    {
+                        _embeddingCache[item.Code] = embedding;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Erro ao gerar embedding para {item.Code}: {ex.Message}");
+                }
+            });
+
+            System.Diagnostics.Debug.WriteLine($"Embeddings gerados: {_embeddingCache.Count}");
+        }
+
         private static List<UniClassItem> LoadFromJson()
         {
             try
             {
-                // Procurar JSON na pasta da DLL
                 string assemblyPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                string jsonPath = Path.Combine(assemblyPath, "Pr_Uniclass.json");
 
-                // Tentar nome alternativo se não encontrar
-                if (!File.Exists(jsonPath))
+                var candidateFileNames = new[]
                 {
-                    jsonPath = Path.Combine(assemblyPath, "Uniclass2015_Pr_v1_39.json");
-                }
+                    "Pr_Uniclass.json",
+                    "Uniclass2015_Pr_v1_39.json",
+                    "Uniclass2015_Pr_v1_39.JSON",
+                    "uniclass_products.json",
+                    "Uniclass.json"
+                };
 
-                if (!File.Exists(jsonPath))
+                var attemptedPaths = new List<string>();
+                string foundPath = null;
+
+                // Helper to check a directory for candidate files and also for any Uniclass*.json files
+                void CheckDirectory(string dir)
                 {
-                    System.Diagnostics.Debug.WriteLine($"✗ ERRO: JSON não encontrado!");
-                    System.Diagnostics.Debug.WriteLine($"   Caminho esperado: {jsonPath}");
-                    System.Diagnostics.Debug.WriteLine($"   Pasta atual: {assemblyPath}");
+                    if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+                        return;
 
-                    // Listar arquivos na pasta para debug
-                    if (Directory.Exists(assemblyPath))
+                    try
                     {
-                        System.Diagnostics.Debug.WriteLine($"   Arquivos na pasta:");
-                        foreach (var file in Directory.GetFiles(assemblyPath))
+                        foreach (var name in candidateFileNames)
                         {
-                            System.Diagnostics.Debug.WriteLine($"     - {Path.GetFileName(file)}");
+                            var p = Path.Combine(dir, name);
+                            attemptedPaths.Add(p);
+                            if (File.Exists(p) && foundPath == null)
+                                foundPath = p;
+                        }
+
+                        if (foundPath == null)
+                        {
+                            // look for any file matching pattern
+                            var matches = Directory.GetFiles(dir, "Uniclass*.json", SearchOption.TopDirectoryOnly);
+                            foreach (var m in matches)
+                            {
+                                attemptedPaths.Add(m);
+                                if (foundPath == null)
+                                    foundPath = m;
+                            }
                         }
                     }
+                    catch { }
+                }
 
+                // Check assembly folder
+                CheckDirectory(assemblyPath);
+
+                // Check current directory
+                CheckDirectory(Directory.GetCurrentDirectory());
+
+                // Check application base directory
+                CheckDirectory(AppDomain.CurrentDomain.BaseDirectory);
+
+                // Check common ProgramData Autodesk Revit Addins folder (where Revit add-ins are usually installed)
+                try
+                {
+                    var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+                    if (!string.IsNullOrEmpty(programData))
+                    {
+                        var revitAddins = Path.Combine(programData, "Autodesk", "Revit", "Addins");
+                        CheckDirectory(revitAddins);
+
+                        // also check subfolders (yeared addin folders)
+                        if (Directory.Exists(revitAddins))
+                        {
+                            foreach (var sub in Directory.GetDirectories(revitAddins))
+                            {
+                                CheckDirectory(sub);
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                // Walk up parent folders from assembly path to try to locate the JSON (up to3 levels)
+                try
+                {
+                    var current = assemblyPath;
+                    for (int i =0; i <3 && !string.IsNullOrEmpty(current); i++)
+                    {
+                        CheckDirectory(current);
+                        var parent = Directory.GetParent(current);
+                        if (parent == null) break;
+                        current = parent.FullName;
+                    }
+                }
+                catch { }
+
+                if (foundPath == null)
+                {
+                    // If still not found, write a clear debug message listing attempted locations
+                    System.Diagnostics.Debug.WriteLine("JSON não encontrado. Caminhos verificados:");
+                    foreach (var p in attemptedPaths.Distinct())
+                    {
+                        System.Diagnostics.Debug.WriteLine(p);
+                    }
+
+                    System.Diagnostics.Debug.WriteLine("JSON não encontrado");
                     return null;
                 }
 
-                System.Diagnostics.Debug.WriteLine($"✓ JSON encontrado: {jsonPath}");
+                System.Diagnostics.Debug.WriteLine($"Carregando JSON de: {foundPath}");
 
                 var items = new List<UniClassItem>();
-
-                // Ler e parsear JSON
-                string jsonContent = File.ReadAllText(jsonPath);
+                string jsonContent = File.ReadAllText(foundPath);
                 var jsonData = JObject.Parse(jsonContent);
 
-                // Verificar estrutura básica
                 if (!jsonData.ContainsKey("items"))
                 {
-                    System.Diagnostics.Debug.WriteLine("✗ ERRO: JSON não tem propriedade 'items'");
+                    System.Diagnostics.Debug.WriteLine("JSON sem propriedade 'items'");
                     return null;
                 }
 
                 var itemsObject = jsonData["items"] as JObject;
-                if (itemsObject == null)
-                {
-                    System.Diagnostics.Debug.WriteLine("✗ ERRO: 'items' não é um objeto válido");
-                    return null;
-                }
+                if (itemsObject == null) return null;
 
-                System.Diagnostics.Debug.WriteLine($"✓ Lendo {itemsObject.Count} itens do JSON...");
-
-                int itemsLoaded = 0;
-
-                // Processar cada item
                 foreach (var property in itemsObject.Properties())
                 {
                     try
                     {
                         var itemData = property.Value as JObject;
-                        if (itemData == null)
-                            continue;
+                        if (itemData == null) continue;
 
                         string code = itemData["code"]?.ToString();
                         string title = itemData["title"]?.ToString();
 
-                        // Pular itens sem code ou title
                         if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(title))
                             continue;
 
@@ -247,47 +225,21 @@ namespace CoordinatorPro.Services
                             Code = code,
                             Title = title,
                             Keywords = ExtractKeywordsFromTitle(title),
-                            Category = DetermineCategory(code),
+                            Category = itemData["category"]?.ToString() ?? "",
                             Level = itemData["level"]?.ToObject<int>() ?? GetLevelFromCode(code),
                             Parent = itemData["parent"]?.ToString()
                         };
 
                         items.Add(item);
-                        itemsLoaded++;
                     }
-                    catch (Exception ex)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"⚠ Erro ao processar item '{property.Name}': {ex.Message}");
-                    }
+                    catch { }
                 }
-
-                System.Diagnostics.Debug.WriteLine($"✓ {itemsLoaded} itens carregados com sucesso");
 
                 return items;
             }
-            catch (FileNotFoundException ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"✗ ERRO: Arquivo JSON não encontrado");
-                System.Diagnostics.Debug.WriteLine($"   {ex.Message}");
-                return null;
-            }
-            catch (JsonReaderException ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"✗ ERRO ao ler JSON: {ex.Message}");
-                System.Diagnostics.Debug.WriteLine($"   Linha: {ex.LineNumber}, Posição: {ex.LinePosition}");
-                return null;
-            }
-            catch (JsonException ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"✗ ERRO ao parsear JSON: {ex.Message}");
-                System.Diagnostics.Debug.WriteLine($"   Verifique se o arquivo JSON está bem formatado");
-                return null;
-            }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"✗ ERRO ao ler JSON: {ex.Message}");
-                System.Diagnostics.Debug.WriteLine($"   Tipo: {ex.GetType().Name}");
-                System.Diagnostics.Debug.WriteLine($"   Stack: {ex.StackTrace}");
+                System.Diagnostics.Debug.WriteLine($"Erro ao ler JSON: {ex.Message}");
                 return null;
             }
         }
@@ -298,36 +250,13 @@ namespace CoordinatorPro.Services
                 return new List<string>();
 
             var separators = new[] { ' ', '-', ',', '/', '(', ')', '&', '.', ';' };
+            var stopWords = new HashSet<string> { "and", "the", "for", "with", "from", "into", "are", "was", "were", "been" };
 
-            var words = title.ToLowerInvariant()
+            return title.ToLowerInvariant()
                 .Split(separators, StringSplitOptions.RemoveEmptyEntries)
-                .Where(w => w.Length > 2)
-                .Where(w => !IsStopWord(w))
+                .Where(w => w.Length > 2 && !stopWords.Contains(w))
                 .Distinct()
                 .ToList();
-
-            return words;
-        }
-
-        private static bool IsStopWord(string word)
-        {
-            var stopWords = new HashSet<string> { "and", "the", "for", "with", "from", "into", "are", "was", "were", "been" };
-            return stopWords.Contains(word);
-        }
-
-        private static string DetermineCategory(string code)
-        {
-            if (string.IsNullOrEmpty(code))
-                return "Unknown";
-
-            if (code.StartsWith("Pr_15_31"))
-                return "Applied cleaning and treatment products";
-            else if (code.StartsWith("Pr_15"))
-                return "Preparatory products";
-            else if (code.StartsWith("Pr_"))
-                return "Products";
-            else
-                return "Other";
         }
 
         private static int GetLevelFromCode(string code)
@@ -338,61 +267,6 @@ namespace CoordinatorPro.Services
             return code.Count(c => c == '_') + 1;
         }
 
-        private static string GetParentCode(string code)
-        {
-            if (string.IsNullOrEmpty(code) || !code.Contains("_"))
-                return null;
-
-            int lastUnderscore = code.LastIndexOf('_');
-            return code.Substring(0, lastUnderscore);
-        }
-
-        private static void BuildOptimizedIndex()
-        {
-            _uniclassStrings = new List<string>(_database.Count);
-            _categoryIndex = new Dictionary<string, List<int>>();
-            _keywordIndex = new Dictionary<string, List<int>>();
-
-            var tempStrings = new string[_database.Count];
-
-            Parallel.For(0, _database.Count, i =>
-            {
-                var item = _database[i];
-
-                string keywords = item.Keywords != null && item.Keywords.Any()
-                    ? string.Join(" ", item.Keywords)
-                    : "";
-
-                tempStrings[i] = $"{item.Title} {keywords}".Trim().ToLowerInvariant();
-            });
-
-            _uniclassStrings.AddRange(tempStrings);
-
-            for (int i = 0; i < _database.Count; i++)
-            {
-                var item = _database[i];
-
-                string cat = item.Category?.ToLowerInvariant() ?? "unknown";
-                if (!_categoryIndex.ContainsKey(cat))
-                    _categoryIndex[cat] = new List<int>();
-                _categoryIndex[cat].Add(i);
-
-                if (item.Keywords != null)
-                {
-                    foreach (var keyword in item.Keywords)
-                    {
-                        string key = keyword.ToLowerInvariant();
-                        if (!_keywordIndex.ContainsKey(key))
-                            _keywordIndex[key] = new List<int>();
-                        _keywordIndex[key].Add(i);
-                    }
-                }
-            }
-        }
-
-        /// <summary>
-        /// ✅ MODIFICADO: Aceita nível máximo de classificação desejado (1-4)
-        /// </summary>
         public static ClassificationResult Classify(Dictionary<string, string> elementData, int maxLevel = 4)
         {
             if (elementData == null || !elementData.Any())
@@ -401,7 +275,6 @@ namespace CoordinatorPro.Services
             if (_database == null || !_database.Any())
                 return CreateErrorResult("Base não carregada");
 
-            // ✅ Validar nível solicitado
             if (maxLevel < 1 || maxLevel > 4)
                 maxLevel = 4;
 
@@ -409,7 +282,6 @@ namespace CoordinatorPro.Services
 
             if (!string.IsNullOrEmpty(cacheKey) && _cache.TryGetValue(cacheKey, out string cachedResult))
             {
-                // ✅ Verificar se cache está no nível correto
                 if (IsCorrectLevel(cachedResult, maxLevel))
                 {
                     return new ClassificationResult
@@ -421,319 +293,128 @@ namespace CoordinatorPro.Services
                 }
             }
 
-            // ✅ Filtrar apenas itens do nível desejado ou inferior
-            List<int> targetIndices = GetTargetIndicesFast(elementData, maxLevel);
+            var results = ClassifyByLevel(elementData, maxLevel);
 
-            if (!targetIndices.Any())
+            if (results.Confidence > HIGH_CONFIDENCE_THRESHOLD && !string.IsNullOrEmpty(cacheKey))
             {
-                System.Diagnostics.Debug.WriteLine("✗ Nenhum candidato encontrado!");
+                _cache.TryAdd(cacheKey, results.Code);
+            }
+
+            return results;
+        }
+
+        private static ClassificationResult ClassifyByLevel(Dictionary<string, string> elementData, int targetLevel)
+        {
+            string searchText = BuildSearchString(elementData);
+
+            if (string.IsNullOrEmpty(searchText))
+                return CreateErrorResult("Sem dados para busca");
+
+            var queryEmbedding = EmbeddingService.GenerateEmbedding(searchText);
+
+            var candidates = _database
+                .Where(item => item.Level <= targetLevel)
+                .ToList();
+
+            if (!candidates.Any())
+                return CreateErrorResult("Nenhum candidato no nível especificado");
+
+            System.Diagnostics.Debug.WriteLine($"Classificando: '{searchText}' | Candidatos: {candidates.Count} | Nível: {targetLevel}");
+
+            var scored = new List<(UniClassItem item, float score)>();
+
+            foreach (var candidate in candidates)
+            {
+                if (!_embeddingCache.TryGetValue(candidate.Code, out var candidateEmbedding))
+                    continue;
+
+                float similarity = EmbeddingService.CosineSimilarity(queryEmbedding, candidateEmbedding);
+
+                if (ContainsAntonyms(searchText, candidate.Title))
+                    similarity *= 0.5f;
+
+                scored.Add((candidate, similarity));
+            }
+
+            var best = scored.OrderByDescending(x => x.score).FirstOrDefault();
+
+            if (best.item == null || best.score < 0.3f)
+            {
                 return new ClassificationResult
                 {
-                    Code = "NC - Sem correspondência",
+                    Code = "NC - Não Classificado",
                     Confidence = 0,
                     Source = "NoMatch"
                 };
             }
 
-            // ✅ Aumentado de 100 para 300 candidatos para análise
-            int maxCandidates = Math.Min(300, targetIndices.Count);
-            var topCandidates = targetIndices.Take(maxCandidates).ToList();
-            var filteredStrings = topCandidates.Select(i => _uniclassStrings[i]).ToList();
-
-            string searchString = BuildSimpleSearchString(elementData);
-
-            if (string.IsNullOrEmpty(searchString))
-            {
-                System.Diagnostics.Debug.WriteLine("✗ ERRO: SearchString vazia!");
-                System.Diagnostics.Debug.WriteLine($"   ElementData count: {elementData.Count}");
-                foreach (var kvp in elementData)
-                {
-                    System.Diagnostics.Debug.WriteLine($"   {kvp.Key}: '{kvp.Value}'");
-                }
-                return CreateErrorResult("Sem dados para busca");
-            }
-
-            // ✅ DEBUG: Mostrar string de busca
-            System.Diagnostics.Debug.WriteLine($"🔍 Buscando: '{searchString}' | Candidatos: {topCandidates.Count} | Nível máx: {maxLevel}");
-
-            // ✅ Aumentado limit para retornar top 3 para análise
-            var results = FuzzySharp.Process.ExtractTop(
-                searchString,
-                filteredStrings,
-                limit: 3,
-                cutoff: DEFAULT_CUTOFF
-            );
-
-            if (results != null && results.Any())
-            {
-                var best = results.First();
-
-                // ✅ DEBUG: Mostrar top 3 matches
-                System.Diagnostics.Debug.WriteLine($"📊 Top matches:");
-                foreach (var result in results.Take(3))
-                {
-                    System.Diagnostics.Debug.WriteLine($"   Score {result.Score}: {result.Value}");
-                }
-
-                int localIndex = filteredStrings.IndexOf(best.Value);
-                int globalIndex = topCandidates[localIndex];
-
-                if (globalIndex >= 0 && globalIndex < _database.Count)
-                {
-                    var item = _database[globalIndex];
-
-                    // ✅ Ajustar para o nível solicitado se necessário
-                    var adjustedItem = AdjustToLevel(item, maxLevel);
-
-                    string classification = $"{adjustedItem.Code} - {adjustedItem.Title}";
-
-                    if (best.Score > HIGH_CONFIDENCE_THRESHOLD && !string.IsNullOrEmpty(cacheKey))
-                    {
-                        _cache.TryAdd(cacheKey, classification);
-                    }
-
-                    return new ClassificationResult
-                    {
-                        Code = classification,
-                        Confidence = best.Score,
-                        Source = "FuzzyMatch",
-                        Alternatives = new List<string>()
-                    };
-                }
-            }
+            int confidence = (int)(best.score * 100);
 
             return new ClassificationResult
             {
-                Code = "NC - Não Classificado",
-                Confidence = 0,
-                Source = "NoMatch"
+                Code = $"{best.item.Code} - {best.item.Title}",
+                Confidence = confidence,
+                Source = "AI-Embedding",
+                Alternatives = scored
+                    .OrderByDescending(x => x.score)
+                    .Skip(1)
+                    .Take(2)
+                    .Select(x => $"{x.item.Code} ({(int)(x.score * 100)}%)")
+                    .ToList()
             };
         }
 
-        /// <summary>
-        /// ✅ NOVO: Verifica se o código cached está no nível correto
-        /// </summary>
+        private static bool ContainsAntonyms(string text1, string text2)
+        {
+            text1 = text1.ToLowerInvariant();
+            text2 = text2.ToLowerInvariant();
+
+            foreach (var antonymPair in Antonyms)
+            {
+                var parts = antonymPair.Split('|');
+                if ((text1.Contains(parts[0]) && text2.Contains(parts[1])) ||
+                    (text1.Contains(parts[1]) && text2.Contains(parts[0])))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static string BuildSearchString(Dictionary<string, string> elementData)
+        {
+            var parts = new List<string>();
+
+            if (elementData.TryGetValue("Category", out string category))
+                parts.Add(category);
+
+            if (elementData.TryGetValue("Family", out string family))
+                parts.Add(family);
+
+            if (elementData.TryGetValue("Type", out string type))
+                parts.Add(type);
+
+            string[] additionalParams = new[] { "Description", "Material", "Model", "Manufacturer", "Mark", "Type Mark" };
+
+            foreach (var param in additionalParams)
+            {
+                if (elementData.TryGetValue(param, out string value) && !string.IsNullOrEmpty(value))
+                    parts.Add(value);
+            }
+
+            return string.Join(" ", parts);
+        }
+
         private static bool IsCorrectLevel(string classification, int maxLevel)
         {
             if (string.IsNullOrEmpty(classification))
                 return false;
 
-            // Extrair código (antes do " - ")
             string code = classification.Split(new[] { " - " }, StringSplitOptions.None)[0];
             int level = GetLevelFromCode(code);
 
             return level <= maxLevel;
-        }
-
-        /// <summary>
-        /// ✅ NOVO: Ajusta item para o nível desejado
-        /// </summary>
-        private static UniClassItem AdjustToLevel(UniClassItem item, int maxLevel)
-        {
-            if (item.Level <= maxLevel)
-                return item; // Já está no nível correto ou inferior
-
-            // Subir na hierarquia até atingir o nível desejado
-            string targetCode = GetCodeAtLevel(item.Code, maxLevel);
-
-            if (string.IsNullOrEmpty(targetCode))
-                return item; // Fallback
-
-            // Buscar o item pai no nível desejado
-            var parentItem = _database.FirstOrDefault(i => i.Code == targetCode);
-
-            return parentItem ?? item; // Fallback para item original se não encontrar
-        }
-
-        /// <summary>
-        /// ✅ NOVO: Obtém o código no nível especificado
-        /// </summary>
-        private static string GetCodeAtLevel(string code, int targetLevel)
-        {
-            if (string.IsNullOrEmpty(code))
-                return null;
-
-            var parts = code.Split('_');
-
-            if (parts.Length <= targetLevel)
-                return code; // Já está no nível ou inferior
-
-            // Pegar apenas as partes até o nível desejado
-            return string.Join("_", parts.Take(targetLevel));
-        }
-
-        /// <summary>
-        /// ✅ MODIFICADO: Filtra por nível máximo com fallback inteligente
-        /// </summary>
-        private static List<int> GetTargetIndicesFast(Dictionary<string, string> elementData, int maxLevel)
-        {
-            var indices = new HashSet<int>();
-
-            // ✅ ESTRATÉGIA 1: Buscar por categoria mapeada via keyword
-            if (elementData.ContainsKey("Category") && !string.IsNullOrEmpty(elementData["Category"]))
-            {
-                string revitCategory = elementData["Category"];
-
-                if (CategoryMapping.TryGetValue(revitCategory, out string mappedKeyword))
-                {
-                    if (_keywordIndex.TryGetValue(mappedKeyword, out var keywordIndices))
-                    {
-                        foreach (var idx in keywordIndices)
-                        {
-                            if (_database[idx].Level <= maxLevel)
-                                indices.Add(idx);
-                        }
-
-                        System.Diagnostics.Debug.WriteLine($"✓ Encontrados {indices.Count} candidatos via keyword '{mappedKeyword}'");
-                    }
-                    else
-                    {
-                        System.Diagnostics.Debug.WriteLine($"⚠ Keyword '{mappedKeyword}' não encontrada no índice");
-                    }
-                }
-                else
-                {
-                    System.Diagnostics.Debug.WriteLine($"⚠ Categoria '{revitCategory}' não tem mapeamento");
-                }
-            }
-
-            // ✅ ESTRATÉGIA 2: Se poucos resultados, buscar em "products" genérico
-            if (indices.Count < 20)
-            {
-                System.Diagnostics.Debug.WriteLine($"⚠ Poucos candidatos ({indices.Count}), expandindo busca para 'products'");
-
-                if (_categoryIndex.TryGetValue("products", out var productIndices))
-                {
-                    foreach (var idx in productIndices.Take(100))
-                    {
-                        if (_database[idx].Level <= maxLevel)
-                            indices.Add(idx);
-                    }
-                    System.Diagnostics.Debug.WriteLine($"✓ Total após expansão: {indices.Count} candidatos");
-                }
-            }
-
-            // ✅ ESTRATÉGIA 3: Se ainda poucos, buscar palavras-chave do Family/Type
-            if (indices.Count < 20 && elementData.ContainsKey("Family"))
-            {
-                System.Diagnostics.Debug.WriteLine($"⚠ Ainda poucos candidatos, buscando por Family keywords");
-
-                string family = elementData["Family"].ToLowerInvariant();
-                var familyWords = family.Split(new[] { ' ', '-', '_' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Where(w => w.Length > 3)
-                    .Take(3); // Pegar primeiras 3 palavras significativas
-
-                foreach (var word in familyWords)
-                {
-                    if (_keywordIndex.TryGetValue(word, out var wordIndices))
-                    {
-                        foreach (var idx in wordIndices.Take(30))
-                        {
-                            if (_database[idx].Level <= maxLevel)
-                                indices.Add(idx);
-                        }
-                        System.Diagnostics.Debug.WriteLine($"✓ Adicionados candidatos via keyword '{word}': {indices.Count} total");
-                    }
-                }
-            }
-
-            // ✅ ESTRATÉGIA 4: ÚLTIMO RECURSO - buscar em TODA a base filtrada por nível
-            if (indices.Count < 10)
-            {
-                System.Diagnostics.Debug.WriteLine($"⚠ FALLBACK: Poucos candidatos ({indices.Count}), buscando em toda base (nível ≤ {maxLevel})");
-
-                for (int i = 0; i < _database.Count && indices.Count < 200; i++)
-                {
-                    if (_database[i].Level <= maxLevel)
-                        indices.Add(i);
-                }
-
-                System.Diagnostics.Debug.WriteLine($"✓ Total após busca completa: {indices.Count} candidatos");
-            }
-
-            var result = indices.ToList();
-            System.Diagnostics.Debug.WriteLine($"🎯 FINAL: {result.Count} candidatos para classificação");
-            return result;
-        }
-
-        private static string BuildSimpleSearchString(Dictionary<string, string> elementData)
-        {
-            var parts = new List<string>();
-
-            // ✅ SEMPRE incluir Category (se disponível)
-            if (elementData.ContainsKey("Category") && !string.IsNullOrEmpty(elementData["Category"]))
-            {
-                string category = elementData["Category"];
-                if (CategoryMapping.TryGetValue(category, out string mapped))
-                    parts.Add(mapped);
-                else
-                {
-                    // Usar categoria original normalizada
-                    string normalized = category.ToLowerInvariant()
-                        .Replace("equipment", "")
-                        .Replace("service", "")
-                        .Trim();
-                    if (!string.IsNullOrEmpty(normalized))
-                        parts.Add(normalized);
-                }
-            }
-
-            // ✅ SEMPRE incluir Family (se disponível)
-            if (elementData.ContainsKey("Family") && !string.IsNullOrEmpty(elementData["Family"]))
-            {
-                parts.Add(CleanString(elementData["Family"]));
-            }
-
-            // ✅ SEMPRE incluir Type (se disponível)
-            if (elementData.ContainsKey("Type") && !string.IsNullOrEmpty(elementData["Type"]))
-            {
-                parts.Add(CleanString(elementData["Type"]));
-            }
-
-            // ✅ Incluir outros parâmetros relevantes se disponíveis
-            string[] additionalParams = new[] { "Description", "Material", "Model", "Manufacturer", "Mark", "Type Mark" };
-            foreach (var param in additionalParams)
-            {
-                if (elementData.ContainsKey(param) && !string.IsNullOrEmpty(elementData[param]))
-                {
-                    parts.Add(CleanString(elementData[param]));
-                }
-            }
-
-            string searchString = string.Join(" ", parts).Trim().ToLowerInvariant();
-
-            // ✅ Limpar caracteres especiais e múltiplos espaços
-            searchString = System.Text.RegularExpressions.Regex.Replace(searchString, @"[^\w\s]", " ");
-            searchString = System.Text.RegularExpressions.Regex.Replace(searchString, @"\s+", " ").Trim();
-
-            // ✅ DEBUG
-            if (string.IsNullOrEmpty(searchString))
-            {
-                System.Diagnostics.Debug.WriteLine("⚠ AVISO: SearchString vazia!");
-            }
-            else
-            {
-                System.Diagnostics.Debug.WriteLine($"📝 SearchString construída: '{searchString}'");
-            }
-
-            return searchString;
-        }
-
-        /// <summary>
-        /// ✅ NOVO: Limpa e normaliza strings
-        /// </summary>
-        private static string CleanString(string input)
-        {
-            if (string.IsNullOrEmpty(input))
-                return "";
-
-            // Remover caracteres especiais comuns mas manter espaços
-            return input.Replace("\"", "")
-                       .Replace("\\", "")
-                       .Replace("/", " ")
-                       .Replace("-", " ")
-                       .Replace("_", " ")
-                       .Trim();
         }
 
         private static string BuildCacheKey(Dictionary<string, string> elementData)
@@ -761,18 +442,14 @@ namespace CoordinatorPro.Services
         public static void ClearCache()
         {
             _cache.Clear();
-        }
-
-        public static string GetStatistics()
-        {
-            return $"Base: {(_database?.Count ?? 0)} | Cache: {_cache.Count} | Índice Keywords: {_keywordIndex?.Count ?? 0}";
+            _embeddingCache.Clear();
         }
 
         public static void TestClassification()
         {
             if (!Initialize())
             {
-                System.Diagnostics.Debug.WriteLine("✗ Falha ao inicializar base de dados");
+                System.Diagnostics.Debug.WriteLine("Falha ao inicializar base de dados");
                 return;
             }
 
@@ -783,23 +460,18 @@ namespace CoordinatorPro.Services
             };
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
-
-            for (int i = 0; i < 100; i++)
-            {
-                var result = Classify(testData);
-            }
-
+            var result = Classify(testData);
             sw.Stop();
 
-            System.Diagnostics.Debug.WriteLine($"✓ 100 classificações em {sw.ElapsedMilliseconds}ms");
-            System.Diagnostics.Debug.WriteLine($"✓ Média: {sw.ElapsedMilliseconds / 100.0}ms por elemento");
+            System.Diagnostics.Debug.WriteLine($"Teste de classificação: {result.Code}");
+            System.Diagnostics.Debug.WriteLine($"Confiança: {result.Confidence}%");
+            System.Diagnostics.Debug.WriteLine($"Tempo: {sw.ElapsedMilliseconds}ms");
         }
 
         public static string GetClassificationDebugInfo(Dictionary<string, string> elementData)
         {
-            string searchString = BuildSimpleSearchString(elementData);
-            List<int> targetIndices = GetTargetIndicesFast(elementData, 4);
-            return $"Search: '{searchString}' | Candidates: {targetIndices.Count}";
+            string searchString = BuildSearchString(elementData);
+            return $"Search: '{searchString}'";
         }
     }
 }
